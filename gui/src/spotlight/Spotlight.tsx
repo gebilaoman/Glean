@@ -14,12 +14,10 @@ import { api, events, type ActionKind, type AppConfig, type ModelBrief } from '.
 import {
   Chevron,
   Close,
-  Copy,
   DragHandle,
   Explain,
   Logo,
   Refresh,
-  Save,
   SearchAI,
   Speaker,
   Spinner,
@@ -34,7 +32,7 @@ interface Result {
 }
 
 /** 配置还没加载到时先按全量渲染，避免闪一下空工具栏。 */
-const DEFAULT_ACTIONS: ActionKind[] = ['search', 'translate', 'explain', 'save', 'copy', 'speak'];
+const DEFAULT_ACTIONS: ActionKind[] = ['search', 'translate', 'explain', 'speak'];
 
 export function Spotlight() {
   const [selection, setSelection] = useState('');
@@ -172,24 +170,6 @@ export function Spotlight() {
     }, 900);
   };
 
-  const onCopy = async () => {
-    try {
-      await api.copySelection();
-      flash('已复制', true);
-    } catch (e) {
-      flash(String(e));
-    }
-  };
-
-  const onSave = async () => {
-    try {
-      const path = await api.saveSelection();
-      flash(`已存到 ${path.split('/').pop()}`);
-    } catch (e) {
-      flash(String(e));
-    }
-  };
-
   const toggle = (id: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -209,8 +189,6 @@ export function Spotlight() {
     { kind: 'search', label: () => 'AI 搜索', Icon: SearchAI, run: () => runLlm('search'), active: () => action === 'search' },
     { kind: 'translate', label: () => '翻译', Icon: Translate, run: () => runLlm('translate'), active: () => action === 'translate' },
     { kind: 'explain', label: () => '解释', Icon: Explain, run: () => runLlm('explain'), active: () => action === 'explain' },
-    { kind: 'save', label: () => '保存', Icon: Save, run: onSave },
-    { kind: 'copy', label: () => '复制', Icon: Copy, run: onCopy },
     { kind: 'speak', label: () => (speaking ? '停止' : '朗读'), Icon: Speaker, run: onSpeak, active: () => speaking },
   ];
 

@@ -68,10 +68,13 @@ pub enum ActionKind {
     Translate,
     Explain,
     Search,
-    Copy,
-    Save,
     /// 朗读：不走模型，调系统 TTS。
     Speak,
+    /// 已下线的动作。旧配置里残留的取值（如 "save"/"copy"）落到这里，
+    /// 反序列化不失败——一旦失败 `load()` 会整份回落默认配置，把用户
+    /// 配好的模型全冲掉。永不渲染、永不执行，下次保存自然消失。
+    #[serde(other)]
+    Removed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,9 +92,6 @@ pub struct AppConfig {
     /// 是否响应双击选词。
     #[serde(default = "default_true")]
     pub double_click_trigger: bool,
-    /// 保存动作写入的目录。空则用 `dirs::document_dir()/Glean`。
-    #[serde(default)]
-    pub save_dir: String,
     /// 工具栏上显示哪些动作。渲染按固定顺序来，这里只当开关集合用；
     /// 老配置没有该字段时缺省全开。
     #[serde(default = "default_actions")]
@@ -99,12 +99,10 @@ pub struct AppConfig {
 }
 
 /// 工具栏的固定渲染顺序（前端也按这个顺序过滤）。
-pub const CANONICAL_ACTIONS: [ActionKind; 6] = [
+pub const CANONICAL_ACTIONS: [ActionKind; 4] = [
     ActionKind::Search,
     ActionKind::Translate,
     ActionKind::Explain,
-    ActionKind::Save,
-    ActionKind::Copy,
     ActionKind::Speak,
 ];
 
@@ -142,7 +140,6 @@ impl Default for AppConfig {
             drag_threshold: default_drag_threshold(),
             settle_ms: default_settle_ms(),
             double_click_trigger: true,
-            save_dir: String::new(),
             actions: default_actions(),
         }
     }
@@ -177,9 +174,42 @@ pub fn system_prompt(action: ActionKind, target_lang: &str) -> String {
             "你是检索型助手。针对用户给出的片段，用{lang}给出与之相关的关键事实、背景和延伸信息。\
              控制在 200 字以内，不确定的地方要明确说不确定。"
         ),
-        // 复制 / 保存 / 朗读不走模型，这个提示词实际不会被用到，兜底而已。
-        ActionKind::Copy | ActionKind::Save | ActionKind::Speak => {
+        // 朗读不走模型，这个提示词实际不会被用到，兜底而已。
+        ActionKind::Speak | ActionKind::Removed => {
             format!("用{lang}简要概括用户给出的文本。")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 旧配置里可能残留已下线的动作（save/copy）和已删除的字段（save_dir）。
+    /// 解析必须成功且模型完好——失败的话 load() 会整份回落默认配置，
+    /// 把用户配好的模型与 key 全冲掉。
+    #[test]
+    fn parses_config_with_removed_actions_and_fields() {
+        let raw = r#"{
+            "models": [{
+                "id": "m", "name": "n", "endpoint": "http://x/v1", "model": "g",
+                "api_key": "sk-x", "enabled": true, "primary": true, "thinking": "auto"
+            }],
+            "target_lang": "中文",
+            "drag_threshold": 5.0,
+            "settle_ms": 120,
+            "double_click_trigger": true,
+            "save_dir": "/tmp/old",
+            "actions": ["search", "translate", "save", "copy", "speak", "explain"]
+        }"#;
+        let cfg: AppConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(cfg.models.len(), 1);
+        assert_eq!(cfg.models[0].api_key, "sk-x");
+        // 残留动作落到 Removed：不参与渲染执行，但不会让解析失败
+        assert_eq!(
+            cfg.actions.iter().filter(|a| **a == ActionKind::Removed).count(),
+            2
+        );
+        assert!(cfg.actions.contains(&ActionKind::Speak));
     }
 }

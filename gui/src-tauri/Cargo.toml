@@ -15,7 +15,6 @@ tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-pn
 tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
-tauri-plugin-clipboard-manager = "2"
 
 glean-core = { path = "../../crates/core" }
 
@@ -26,7 +25,6 @@ reqwest = { workspace = true }
 futures = { workspace = true }
 dirs = "6"
 parking_lot = "0.12"
-chrono = { version = "0.4", features = ["serde"] }
 # 读 cc-switch 的 SQLite 配置库（bundled：不依赖系统 libsqlite3）
 rusqlite = { version = "0.37", features = ["bundled"] }
 

@@ -12,8 +12,6 @@ const TOOLBAR_ACTIONS: { kind: ActionKind; label: string }[] = [
   { kind: 'search', label: 'AI 搜索' },
   { kind: 'translate', label: '翻译' },
   { kind: 'explain', label: '解释' },
-  { kind: 'save', label: '保存' },
-  { kind: 'copy', label: '复制' },
   { kind: 'speak', label: '朗读' },
 ];
 
@@ -181,14 +179,6 @@ export function Settings() {
             onChange={(e) => patch({ double_click_trigger: e.target.checked })}
           />
           <span>双击选词也触发</span>
-        </label>
-        <label className="row">
-          <span>保存目录</span>
-          <input
-            value={config.save_dir}
-            onChange={(e) => patch({ save_dir: e.target.value })}
-            placeholder="留空则用 ~/Documents/Glean"
-          />
         </label>
       </section>
 

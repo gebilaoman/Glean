@@ -2,7 +2,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-export type ActionKind = 'translate' | 'explain' | 'search' | 'copy' | 'save' | 'speak';
+export type ActionKind = 'translate' | 'explain' | 'search' | 'speak';
 
 /** 思考强度。auto = 不发任何思考参数（兼容性最好）。 */
 export type Thinking = 'auto' | 'off' | 'low' | 'high' | 'max';
@@ -24,7 +24,6 @@ export interface AppConfig {
   drag_threshold: number;
   settle_ms: number;
   double_click_trigger: boolean;
-  save_dir: string;
   /** 工具栏上显示哪些动作（开关集合，渲染顺序固定）。 */
   actions: ActionKind[];
 }
@@ -57,8 +56,6 @@ export const api = {
   retryModel: (action: ActionKind, modelId: string, requestId: string) =>
     invoke<void>('retry_model', { action, modelId, requestId }),
   getSelection: () => invoke<string>('get_selection'),
-  copySelection: () => invoke<void>('copy_selection'),
-  saveSelection: () => invoke<string>('save_selection'),
   /** 朗读划词文本；再点一次停止。返回是否开始朗读。 */
   speakSelection: () => invoke<boolean>('speak_selection'),
   hidePanel: () => invoke<void>('hide_panel'),

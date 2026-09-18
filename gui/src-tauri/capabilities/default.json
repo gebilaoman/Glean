@@ -13,8 +13,6 @@
     "core:webview:allow-set-webview-size",
     "updater:default",
     "dialog:default",
-    "opener:default",
-    "clipboard-manager:default",
-    "clipboard-manager:allow-write-text"
+    "opener:default"
   ]
 }

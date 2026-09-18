@@ -26,8 +26,7 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_clipboard_manager::init());
+        .plugin(tauri_plugin_opener::init());
 
     #[cfg(target_os = "macos")]
     let builder = builder.plugin(tauri_nspanel::init());
@@ -68,8 +67,6 @@ pub fn run() {
             actions::retry_model,
             actions::speak_selection,
             actions::get_selection,
-            actions::copy_selection,
-            actions::save_selection,
             actions::hide_panel,
             actions::set_panel_height,
             actions::open_settings,

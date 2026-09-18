@@ -1,7 +1,7 @@
 # Glean
 
 系统级划词工具：在任意应用里选中文字，光标附近弹出一条不抢焦点的悬浮工具栏，
-就地翻译 / 解释 / AI 搜索 / 复制 / 保存。多个模型可并排对比。
+就地翻译 / 解释 / AI 搜索 / 朗读。多个模型可并排对比。
 
 技术栈：Tauri 2 + Rust + React/TypeScript。目前主攻 macOS。
 
@@ -12,7 +12,7 @@
 | 触发 | `gui/src-tauri/src/selection.rs` | 自建 CGEventTap（只订阅左键按下/松开），把 mousedown/mouseup 合成「拖选」「双击选词」手势 |
 | 取词 | 同上 | `get-selected-text`：macOS AX / Windows UIA，取不到时回落模拟 `Cmd+C` |
 | 悬浮窗 | `gui/src-tauri/src/panel.rs` | `tauri-nspanel` 把窗口换成非激活 `NSPanel`，光标处定位、边缘翻转 |
-| 动作 | `gui/src-tauri/src/actions.rs` | 多模型并发流式调用（OpenAI 兼容），复制 / 保存 / 朗读走本地 |
+| 动作 | `gui/src-tauri/src/actions.rs` | 多模型并发流式调用（OpenAI 兼容），朗读走本地（macOS `say`） |
 
 前端两个页面共用一份产物，用 hash 区分：`index.html` 是悬浮工具栏，
 `index.html#/settings` 是设置窗。
@@ -73,7 +73,7 @@ cd gui && pnpm tauri:build # 出包
   "settle_ms": 120,
   "double_click_trigger": true,
   "save_dir": "",
-  "actions": ["search", "translate", "explain", "save", "copy", "speak"]
+  "actions": ["search", "translate", "explain", "speak"]
 }
 ```
 
@@ -84,7 +84,7 @@ cd gui && pnpm tauri:build # 出包
   - `low`/`high`/`max` 发 `thinking:{type:"enabled"}` + `reasoning_effort`。
     GLM-5.3 不传时默认走 `max`，划词这种小任务选 `low` 快很多。
 - `actions`：工具栏上显示哪些动作（顺序固定）。朗读（`speak`）用 macOS 系统的
-  `say`，再点一次即停。
+  `say`，再点一次即停。旧配置里残留的 `"save"` / `"copy"` 会被忽略。
 - `drag_threshold`：位移小于它的鼠标动作当普通点击丢弃。
 - `settle_ms`：松开鼠标到取词之间的等待。太短会读到上一次的选区，觉得取词「慢半拍」就调大它。
 - 保存动作按天追加到 `save_dir/YYYY-MM-DD.md`，留空则用 `~/Documents/Glean`。

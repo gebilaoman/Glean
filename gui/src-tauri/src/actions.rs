@@ -7,8 +7,6 @@
 use glean_core::{ActionKind, ModelConfig, StreamEvent, config::system_prompt, stream_chat};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_clipboard_manager::ClipboardExt;
-
 use crate::config;
 use crate::panel;
 use crate::state::SpeechTick;
@@ -145,38 +143,6 @@ pub async fn retry_model(
 #[tauri::command]
 pub fn get_selection(state: State<'_, AppState>) -> String {
     state.selection()
-}
-
-#[tauri::command]
-pub fn copy_selection(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let text = state.selection();
-    if text.is_empty() {
-        return Err("没有可复制的文本".into());
-    }
-    app.clipboard().write_text(text).map_err(|e| e.to_string())
-}
-
-/// 保存：按天追加到一个 Markdown 文件，返回落盘路径供前端提示。
-#[tauri::command]
-pub fn save_selection(state: State<'_, AppState>) -> Result<String, String> {
-    let text = state.selection();
-    if text.is_empty() {
-        return Err("没有可保存的文本".into());
-    }
-    let dir = config::save_dir(&state.config.read());
-    let now = chrono::Local::now();
-    let path = dir.join(format!("{}.md", now.format("%Y-%m-%d")));
-
-    let entry = format!("\n## {}\n\n{}\n", now.format("%H:%M:%S"), text);
-    use std::io::Write;
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|e| e.to_string())?;
-    f.write_all(entry.as_bytes()).map_err(|e| e.to_string())?;
-
-    Ok(path.to_string_lossy().to_string())
 }
 
 /// 朗读划词文本；再点一次停止（toggle）。正在朗读时按钮亮着。

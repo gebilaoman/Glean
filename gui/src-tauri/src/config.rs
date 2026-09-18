@@ -33,15 +33,3 @@ pub fn save(config: &AppConfig) -> Result<(), String> {
     std::fs::write(config_path(), json).map_err(|e| e.to_string())
 }
 
-/// 保存动作落盘的目录：配置里指定了就用它，否则 `~/Documents/Glean`。
-pub fn save_dir(config: &AppConfig) -> PathBuf {
-    let dir = if config.save_dir.trim().is_empty() {
-        dirs::document_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("Glean")
-    } else {
-        PathBuf::from(config.save_dir.trim())
-    };
-    let _ = std::fs::create_dir_all(&dir);
-    dir
-}
