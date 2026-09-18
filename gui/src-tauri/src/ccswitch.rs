@@ -44,6 +44,18 @@ fn to_openai_endpoint(base: &str) -> String {
     }
 }
 
+/// 去掉模型名尾部的方括号标记。
+///
+/// cc-switch 里会写成 `glm-5.3[1M]`、`claude-opus-4-8[1m]` —— 方括号是它自己标上下文
+/// 长度的约定，不是模型 id 的一部分，原样发给 OpenAI 端点会 400。
+fn strip_variant(model: &str) -> String {
+    let model = model.trim();
+    match model.rfind('[') {
+        Some(i) if model.ends_with(']') => model[..i].trim().to_string(),
+        _ => model.to_string(),
+    }
+}
+
 /// 读出所有可用的供应商，转成 Glean 的模型配置候选。
 ///
 /// 返回的条目 `enabled: false`、`primary: false`，由用户在设置页里挑了再启用。
@@ -85,11 +97,12 @@ pub fn import_cc_switch() -> Result<Vec<ModelConfig>, String> {
             continue;
         }
 
-        let model = env["ANTHROPIC_MODEL"]
-            .as_str()
-            .or_else(|| cfg["model"].as_str())
-            .unwrap_or("")
-            .to_string();
+        let model = strip_variant(
+            env["ANTHROPIC_MODEL"]
+                .as_str()
+                .or_else(|| cfg["model"].as_str())
+                .unwrap_or(""),
+        );
 
         out.push(ModelConfig {
             // 带上前缀，避免和手工加的模型撞 id。
@@ -111,7 +124,7 @@ pub fn import_cc_switch() -> Result<Vec<ModelConfig>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::to_openai_endpoint;
+    use super::{strip_variant, to_openai_endpoint};
 
     #[test]
     fn maps_known_and_generic_endpoints() {
@@ -133,5 +146,15 @@ mod tests {
             to_openai_endpoint("http://localhost:11434"),
             "http://localhost:11434/v1"
         );
+    }
+
+    #[test]
+    fn strips_context_length_marker() {
+        assert_eq!(strip_variant("glm-5.3[1M]"), "glm-5.3");
+        assert_eq!(strip_variant("claude-opus-4-8[1m]"), "claude-opus-4-8");
+        // 没有标记的原样返回
+        assert_eq!(strip_variant("qwen2.5:7b"), "qwen2.5:7b");
+        // 方括号不在结尾的不动（避免误伤奇怪的模型名）
+        assert_eq!(strip_variant("a[1]b"), "a[1]b");
     }
 }
