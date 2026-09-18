@@ -1,0 +1,279 @@
+/**
+ * 设置窗：权限引导、划词手势参数、模型清单、关于与更新。
+ *
+ * 配置全量读出来在本地改，点「保存」整体写回 Rust（再落盘 config.json）。
+ */
+import { useEffect, useState } from 'react';
+
+import { api, type AppConfig, type ModelConfig, type SystemInfo } from '../api';
+
+const blankModel = (): ModelConfig => ({
+  id: crypto.randomUUID().slice(0, 8),
+  name: '新模型',
+  endpoint: 'http://localhost:11434/v1',
+  model: '',
+  api_key: '',
+  enabled: true,
+  primary: false,
+});
+
+export function Settings() {
+  const [config, setConfig] = useState<AppConfig | null>(null);
+  const [trusted, setTrusted] = useState(true);
+  const [version, setVersion] = useState('');
+  const [sys, setSys] = useState<SystemInfo | null>(null);
+  const [status, setStatus] = useState('');
+  /** cc-switch 导入的候选，挑中才进模型列表 */
+  const [candidates, setCandidates] = useState<ModelConfig[] | null>(null);
+
+  useEffect(() => {
+    api.getConfig().then(setConfig).catch((e) => setStatus(String(e)));
+    api.getAppVersion().then(setVersion).catch(() => {});
+    api.getSystemInfo().then(setSys).catch(() => {});
+
+    // 权限可能在 App 运行期间被授予，轮询刷新状态。
+    const check = () => api.accessibilityTrusted().then(setTrusted).catch(() => {});
+    check();
+    const timer = window.setInterval(check, 2000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  if (!config) return <div className="settings loading">载入中…</div>;
+
+  const patch = (p: Partial<AppConfig>) => setConfig({ ...config, ...p });
+
+  const patchModel = (idx: number, p: Partial<ModelConfig>) => {
+    const models = config.models.map((m, i) => (i === idx ? { ...m, ...p } : m));
+    // 主模型唯一：设了新的就把别人的取消掉。
+    if (p.primary) {
+      models.forEach((m, i) => {
+        if (i !== idx) m.primary = false;
+      });
+    }
+    patch({ models });
+  };
+
+  const save = async () => {
+    try {
+      await api.saveConfig(config);
+      setStatus('已保存');
+    } catch (e) {
+      setStatus(String(e));
+    }
+    window.setTimeout(() => setStatus(''), 1800);
+  };
+
+  const importFromCcSwitch = async () => {
+    setStatus('读取 cc-switch…');
+    try {
+      const list = await api.importCcSwitch();
+      setCandidates(list);
+      setStatus(`找到 ${list.length} 个供应商`);
+    } catch (e) {
+      setCandidates(null);
+      setStatus(String(e));
+    }
+    window.setTimeout(() => setStatus(''), 2500);
+  };
+
+  const adoptCandidate = (c: ModelConfig) => {
+    // 同 id 已经加过就跳过，避免重复点
+    if (config.models.some((m) => m.id === c.id)) return;
+    // 第一个加进来的模型自动设成主模型和启用
+    const firstEver = config.models.length === 0;
+    patch({ models: [...config.models, { ...c, enabled: true, primary: firstEver }] });
+  };
+
+  const checkUpdate = async () => {
+    setStatus('检查更新中…');
+    try {
+      const { check } = await import('@tauri-apps/plugin-updater');
+      const update = await check({ timeout: 30000 });
+      if (!update) {
+        setStatus('已是最新版本');
+        return;
+      }
+      setStatus(`发现新版本 ${update.version}，下载中…`);
+      await update.downloadAndInstall();
+      setStatus('已安装，重启后生效');
+    } catch (e) {
+      setStatus(`检查更新失败：${e}`);
+    }
+  };
+
+  return (
+    <div className="settings">
+      <header data-tauri-drag-region>
+        <h1>Glean 设置</h1>
+        <div className="actions">
+          {status && <span className="status">{status}</span>}
+          <button className="primary" onClick={save}>
+            保存
+          </button>
+        </div>
+      </header>
+
+      {!trusted && (
+        <section className="card warn">
+          <h2>需要辅助功能权限</h2>
+          <p>
+            没有这个权限，全局鼠标钩子和跨应用取词都无法工作。到「系统设置 → 隐私与安全性 →
+            辅助功能」里勾上 Glean，然后重启本应用。
+          </p>
+          <button onClick={() => api.openAccessibilitySettings()}>去授权</button>
+        </section>
+      )}
+
+      <section className="card">
+        <h2>划词</h2>
+        <label className="row">
+          <span>译入语</span>
+          <input
+            value={config.target_lang}
+            onChange={(e) => patch({ target_lang: e.target.value })}
+            placeholder="中文"
+          />
+        </label>
+        <label className="row">
+          <span>拖选阈值（像素）</span>
+          <input
+            type="number"
+            min={1}
+            value={config.drag_threshold}
+            onChange={(e) => patch({ drag_threshold: Number(e.target.value) })}
+          />
+        </label>
+        <label className="row">
+          <span>取词延迟（毫秒）</span>
+          <input
+            type="number"
+            min={0}
+            step={10}
+            value={config.settle_ms}
+            onChange={(e) => patch({ settle_ms: Number(e.target.value) })}
+          />
+          <em>太短会读到上一次的选区</em>
+        </label>
+        <label className="row check">
+          <input
+            type="checkbox"
+            checked={config.double_click_trigger}
+            onChange={(e) => patch({ double_click_trigger: e.target.checked })}
+          />
+          <span>双击选词也触发</span>
+        </label>
+        <label className="row">
+          <span>保存目录</span>
+          <input
+            value={config.save_dir}
+            onChange={(e) => patch({ save_dir: e.target.value })}
+            placeholder="留空则用 ~/Documents/Glean"
+          />
+        </label>
+      </section>
+
+      <section className="card">
+        <div className="card-head">
+          <h2>模型</h2>
+          <div className="btn-row">
+            <button onClick={importFromCcSwitch}>从 cc-switch 导入</button>
+            <button onClick={() => patch({ models: [...config.models, blankModel()] })}>
+              添加模型
+            </button>
+          </div>
+        </div>
+        <p className="hint">
+          兼容所有 OpenAI 协议的服务。端点填到 <code>/v1</code> 为止，本地服务通常不需要 API Key。
+          启用多个即可并排对比。
+        </p>
+        {candidates && (
+          <div className="candidates">
+            <div className="candidates-head">
+              <span>
+                cc-switch 里的供应商（端点已按 OpenAI 协议换算过，加进来后核对一下模型名）
+              </span>
+              <button onClick={() => setCandidates(null)}>收起</button>
+            </div>
+            {candidates.map((c) => {
+              const added = config.models.some((m) => m.id === c.id);
+              return (
+                <div className="candidate" key={c.id}>
+                  <span className="cand-name">{c.name}</span>
+                  <span className="cand-meta">{c.endpoint}</span>
+                  <span className="cand-meta">{c.model || '（未填模型名）'}</span>
+                  <button disabled={added} onClick={() => adoptCandidate(c)}>
+                    {added ? '已添加' : '添加'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {config.models.map((m, i) => (
+          <div className="model-card" key={m.id}>
+            <div className="model-top">
+              <input
+                className="name"
+                value={m.name}
+                onChange={(e) => patchModel(i, { name: e.target.value })}
+              />
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={m.enabled}
+                  onChange={(e) => patchModel(i, { enabled: e.target.checked })}
+                />
+                <span>启用</span>
+              </label>
+              <label className="check">
+                <input
+                  type="radio"
+                  name="primary"
+                  checked={m.primary}
+                  onChange={() => patchModel(i, { primary: true })}
+                />
+                <span>主模型</span>
+              </label>
+              <button
+                className="danger"
+                onClick={() => patch({ models: config.models.filter((_, j) => j !== i) })}
+              >
+                删除
+              </button>
+            </div>
+            <div className="model-grid">
+              <input
+                value={m.endpoint}
+                onChange={(e) => patchModel(i, { endpoint: e.target.value })}
+                placeholder="http://localhost:11434/v1"
+              />
+              <input
+                value={m.model}
+                onChange={(e) => patchModel(i, { model: e.target.value })}
+                placeholder="模型名，如 qwen3:8b"
+              />
+              <input
+                type="password"
+                value={m.api_key}
+                onChange={(e) => patchModel(i, { api_key: e.target.value })}
+                placeholder="API Key（本地服务可留空）"
+              />
+            </div>
+          </div>
+        ))}
+      </section>
+
+      <section className="card">
+        <h2>关于</h2>
+        <p className="mono">
+          Glean {version}
+          {sys && ` · ${sys.build_type} · ${sys.os_version} · ${sys.arch}`}
+        </p>
+        <div className="btn-row">
+          <button onClick={checkUpdate}>检查更新</button>
+          <button onClick={() => api.openConfigDir()}>打开配置目录</button>
+        </div>
+      </section>
+    </div>
+  );
+}

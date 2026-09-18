@@ -1,0 +1,41 @@
+# Rust
+/target/
+**/target/
+# 注意：应用类项目应提交 Cargo.lock（可复现构建），故不忽略。
+
+# Node
+node_modules/
+**/node_modules/
+
+# 前端构建产物（由 vite/tauri 生成）
+gui/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# CodeGraph
+.codegraph/
+
+# Logs / 临时文件
+*.log
+*.tmp
+*.bak
+*.cache
+
+# Secrets
+.env
+.env.secret
+*.secret
+**/private-key.pem
+
+# Tauri 生成的 ACL schema（build.rs 每次重新生成）
+gui/src-tauri/gen/schemas/

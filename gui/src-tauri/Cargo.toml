@@ -1,0 +1,47 @@
+[package]
+name = "glean-gui"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "glean_gui"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
+tauri-plugin-updater = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
+
+glean-core = { path = "../../crates/core" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+futures = { workspace = true }
+dirs = "6"
+parking_lot = "0.12"
+chrono = { version = "0.4", features = ["serde"] }
+# 读 cc-switch 的 SQLite 配置库（bundled：不依赖系统 libsqlite3）
+rusqlite = { version = "0.37", features = ["bundled"] }
+
+# 触发层：全局鼠标钩子
+rdev = "0.5"
+
+# 取词层：跨应用取选中文本（AX/UIA + 模拟复制回落）
+get-selected-text = "0.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# 悬浮窗层：不抢焦点的 NSPanel
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2" }
+# 直接问系统光标位置，绕开 rdev 不转发拖拽坐标的问题（见 selection.rs）
+core-graphics = "0.24"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

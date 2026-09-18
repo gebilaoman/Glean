@@ -1,0 +1,6 @@
+# 本机 rustup 装的是 x86_64 工具链（Rosetta 下），但 Mac 是 arm64。
+# get-selected-text 依赖链里有 bindgen，需要与 Xcode 同架构的 libclang，
+# 所以这里把项目钉死在原生 aarch64 工具链上，不影响其他项目的全局默认。
+[toolchain]
+channel = "stable-aarch64-apple-darwin"
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
