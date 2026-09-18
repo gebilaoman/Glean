@@ -76,9 +76,10 @@ pub async fn run_action(
         .collect();
     let system = system_prompt(action, &target_lang);
 
-    for model in models {
-        // 每个模型一个独立任务：一路超时或报错不拖累其它列。
-        spawn_model_stream(&app, &state.http, model, system.clone(), text.clone(), request_id.clone(), false);
+    // 惰性请求：只立刻发第一个（主模型）。
+    // 其余列等用户在结果区展开时由前端经 retry_model(retry=false) 补发，省 token。
+    if let Some(first) = models.into_iter().next() {
+        spawn_model_stream(&app, &state.http, first, system, text, request_id, false);
     }
 
     Ok(briefs)
@@ -120,7 +121,10 @@ fn spawn_model_stream(
     });
 }
 
-/// 单个模型重试。只重发被点的那一列，其它列的结果不动。
+/// 单列请求。只发被点的那一列，其它列不动。两个用途：
+/// - 结果区的「重译」按钮：`retry = true`，温度抬高重新抽一次；
+/// - 惰性展开的首次请求：`retry = false`（run_action 只发了主模型，
+///   其余列等用户展开才经这里补发，省 token）。
 #[tauri::command]
 pub async fn retry_model(
     app: AppHandle,
@@ -128,6 +132,7 @@ pub async fn retry_model(
     action: ActionKind,
     model_id: String,
     request_id: String,
+    retry: bool,
 ) -> Result<(), String> {
     let text = state.selection();
     if text.is_empty() {
@@ -144,7 +149,7 @@ pub async fn retry_model(
         (model, cfg.target_lang.clone())
     };
     let system = system_prompt(action, &target_lang);
-    spawn_model_stream(&app, &state.http, model, system, text, request_id, true);
+    spawn_model_stream(&app, &state.http, model, system, text, request_id, retry);
     Ok(())
 }
 

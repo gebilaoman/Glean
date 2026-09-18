@@ -62,9 +62,12 @@ export interface SystemInfo {
 export const api = {
   runAction: (action: ActionKind, requestId: string) =>
     invoke<ModelBrief[]>('run_action', { action, requestId }),
-  /** 单个模型重试：只重发那一列，其它列的结果不动。 */
-  retryModel: (action: ActionKind, modelId: string, requestId: string) =>
-    invoke<void>('retry_model', { action, modelId, requestId }),
+  /**
+   * 单列请求：只发那一列，其它列不动。
+   * retry=true 重译（高温重抽）；retry=false 惰性展开的首次请求（常温）。
+   */
+  retryModel: (action: ActionKind, modelId: string, requestId: string, retry: boolean) =>
+    invoke<void>('retry_model', { action, modelId, requestId, retry }),
   getSelection: () => invoke<string>('get_selection'),
   /** 朗读划词文本；再点一次停止。返回是否开始朗读。 */
   speakSelection: () => invoke<boolean>('speak_selection'),

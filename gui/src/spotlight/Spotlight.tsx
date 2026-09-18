@@ -138,15 +138,19 @@ export function Spotlight() {
     }
   };
 
-  /** 单列重试：清掉该列结果重新流式；旧流的分片会被 streamIds 挡在外面。 */
-  const retryModel = async (modelId: string) => {
+  /**
+   * 单列请求：清掉该列结果重新流式；旧流的分片会被 streamIds 挡在外面。
+   * retry=true 是「重译」（高温重抽）；retry=false 是惰性展开的首次请求
+   * （run_action 只发了主模型，其余列等展开才发，省 token）。
+   */
+  const requestModel = async (modelId: string, retry: boolean) => {
     if (!action) return;
     const id = crypto.randomUUID();
     streamIds.current[modelId] = id;
     setResults((prev) => ({ ...prev, [modelId]: { text: '', status: 'streaming' } }));
     setExpanded((prev) => new Set(prev).add(modelId));
     try {
-      await api.retryModel(action, modelId, id);
+      await api.retryModel(action, modelId, id, retry);
     } catch (e) {
       if (streamIds.current[modelId] !== id) return;
       setResults((prev) => ({ ...prev, [modelId]: { text: String(e), status: 'error' } }));
@@ -170,13 +174,18 @@ export function Spotlight() {
     }, 900);
   };
 
-  const toggle = (id: string) =>
+  const toggle = (id: string) => {
+    const opening = !expanded.has(id);
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (opening) next.add(id);
+      else next.delete(id);
       return next;
     });
+    // 惰性请求：第一次展开且这列还没有任何结果 → 这时才发（别在 setState
+    // 更新函数里做，StrictMode 会双调用更新函数）
+    if (opening && results[id] === undefined) requestModel(id, false);
+  };
 
   /** 工具栏动作表。渲染顺序就是这里的顺序；显示与否由 config.actions 决定。 */
   const TOOL_ACTIONS: {
@@ -256,6 +265,7 @@ export function Spotlight() {
                   </span>
                   <span className="model-name">{m.name}</span>
                   {m.primary && <span className="badge">主</span>}
+                  {r === undefined && !open && <span className="badge lazy">点击发送</span>}
                   {r?.status === 'streaming' && <Spinner size={12} />}
                   {r?.status === 'error' && <span className="badge err">失败</span>}
                   {m.id !== '__error__' && (
@@ -268,7 +278,7 @@ export function Spotlight() {
                       }
                       onClick={(e) => {
                         e.stopPropagation();
-                        retryModel(m.id);
+                        requestModel(m.id, true);
                       }}
                     >
                       <Refresh />

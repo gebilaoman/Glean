@@ -54,7 +54,8 @@ cd gui && pnpm tauri:build # 出包
 模型清单是一个数组，端点填到 `/v1` 为止，兼容 llama.cpp / Ollama / vLLM /
 智谱 / DeepSeek / OpenRouter。**列表顺序就是优先级**：结果区按这个顺序排列，
 第一个启用的模型默认展开；设置页用模型卡片上的 ↑↓ 调整顺序
-（`primary` 字段已废弃，仅为兼容旧配置保留）：
+（`primary` 字段已废弃，仅为兼容旧配置保留）。**省 token**：只有主模型立即
+请求，其余列第一次展开时才发送（折叠状态会标「点击发送」）：
 
 ```json
 {
@@ -121,7 +122,6 @@ cd gui && pnpm tauri signer generate -w ~/.tauri/glean.key
 - **没有 Apple Developer ID 签名与公证**，CI 包只有 updater 签名。签名哈希每次变 →
   TCC 授权不持久 → 每次更新后要重新授予辅助功能权限。根治要配 `bundle.macOS`
   的签名身份 + 公证。
-- `gui/src-tauri/icons/` 目前是占位图标，需要替换。
 - Windows / Linux 的悬浮窗只是普通置顶无边框窗，没有「不抢焦点」这层保证；
   Wayland 下全局输入监听受限，暂不支持。
 - 取词对自绘 UI（部分 Electron 应用、游戏）可能失败，这时会回落到模拟复制；

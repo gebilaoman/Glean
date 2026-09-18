@@ -90,8 +90,13 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "退出 Glean", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&settings, &quit])?;
 
+    // 托盘图标必须是单色模板图（macOS 只吃它的 alpha 通道），
+    // 直接用彩色应用图标会被渲染成一团剪影。
+    let tray_png = include_bytes!("../icons/tray-template.png");
+    let tray_img = tauri::image::Image::from_bytes(tray_png)?;
+
     TrayIconBuilder::with_id("glean-tray")
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(tray_img)
         .icon_as_template(true)
         .tooltip("Glean · 划词助手")
         .menu(&menu)

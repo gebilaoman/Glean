@@ -213,6 +213,11 @@ button {
   color: #cfe1ff;
 }
 
+.badge.lazy {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg-dim);
+}
+
 .badge.err {
   background: rgba(255, 107, 107, 0.18);
   color: var(--danger);
