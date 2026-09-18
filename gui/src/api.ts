@@ -26,6 +26,16 @@ export interface AppConfig {
   double_click_trigger: boolean;
   /** 工具栏上显示哪些动作（开关集合，渲染顺序固定）。 */
   actions: ActionKind[];
+  /** 朗读音色，空 = 跟随系统默认。 */
+  tts_voice: string;
+  /** 朗读语速（每分钟字数），0 = 系统默认（约 175）。 */
+  tts_rate: number;
+}
+
+/** 系统里装的一个朗读音色。 */
+export interface VoiceInfo {
+  name: string;
+  locale: string;
 }
 
 export interface ModelBrief {
@@ -58,6 +68,11 @@ export const api = {
   getSelection: () => invoke<string>('get_selection'),
   /** 朗读划词文本；再点一次停止。返回是否开始朗读。 */
   speakSelection: () => invoke<boolean>('speak_selection'),
+  /** 系统已装的音色列表，设置页候选用。 */
+  listVoices: () => invoke<VoiceInfo[]>('list_voices'),
+  /** 用表单里未保存的音色/语速念一句样例。 */
+  previewVoice: (voice: string, rate: number) =>
+    invoke<boolean>('preview_voice', { voice, rate }),
   hidePanel: () => invoke<void>('hide_panel'),
   setPanelHeight: (height: number) => invoke<void>('set_panel_height', { height }),
   openSettings: () => invoke<void>('open_settings'),

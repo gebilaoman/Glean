@@ -73,7 +73,9 @@ cd gui && pnpm tauri:build # 出包
   "settle_ms": 120,
   "double_click_trigger": true,
   "save_dir": "",
-  "actions": ["search", "translate", "explain", "speak"]
+  "actions": ["search", "translate", "explain", "speak"],
+  "tts_voice": "Tingting",
+  "tts_rate": 0
 }
 ```
 
@@ -83,8 +85,11 @@ cd gui && pnpm tauri:build # 出包
     **GLM-5.3 起始终思考**，发关闭会直接 400（code 1210）。
   - `low`/`high`/`max` 发 `thinking:{type:"enabled"}` + `reasoning_effort`。
     GLM-5.3 不传时默认走 `max`，划词这种小任务选 `low` 快很多。
-- `actions`：工具栏上显示哪些动作（顺序固定）。朗读（`speak`）用 macOS 系统的
-  `say`，再点一次即停。旧配置里残留的 `"save"` / `"copy"` 会被忽略。
+- `actions`：工具栏上显示哪些动作（顺序固定）。旧配置里残留的 `"save"` /
+  `"copy"` 会被忽略。
+- `tts_voice` / `tts_rate`：朗读音色与语速。空音色跟随系统默认（念中文常听着
+  不对，推荐 `Tingting` 等 zh_CN 音色）；语速 0 = 默认（约 175，越大越快）。
+  设置页「朗读」卡片可选可试听。朗读用 macOS 的 `say`，再点一次即停。
 - `drag_threshold`：位移小于它的鼠标动作当普通点击丢弃。
 - `settle_ms`：松开鼠标到取词之间的等待。太短会读到上一次的选区，觉得取词「慢半拍」就调大它。
 - 保存动作按天追加到 `save_dir/YYYY-MM-DD.md`，留空则用 `~/Documents/Glean`。

@@ -96,6 +96,13 @@ pub struct AppConfig {
     /// 老配置没有该字段时缺省全开。
     #[serde(default = "default_actions")]
     pub actions: Vec<ActionKind>,
+    /// 朗读音色。空 = 跟随系统默认（中文常听着不对，推荐选个 zh_CN 音色）。
+    /// 取值是 `say -v '?'` 列出的名字，如 "Tingting"。
+    #[serde(default)]
+    pub tts_voice: String,
+    /// 朗读语速（每分钟字数，`say -r`）。0 = 系统默认（约 175）。
+    #[serde(default)]
+    pub tts_rate: u32,
 }
 
 /// 工具栏的固定渲染顺序（前端也按这个顺序过滤）。
@@ -141,6 +148,8 @@ impl Default for AppConfig {
             settle_ms: default_settle_ms(),
             double_click_trigger: true,
             actions: default_actions(),
+            tts_voice: String::new(),
+            tts_rate: 0,
         }
     }
 }

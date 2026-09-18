@@ -66,6 +66,8 @@ pub fn run() {
             actions::run_action,
             actions::retry_model,
             actions::speak_selection,
+            actions::list_voices,
+            actions::preview_voice,
             actions::get_selection,
             actions::hide_panel,
             actions::set_panel_height,

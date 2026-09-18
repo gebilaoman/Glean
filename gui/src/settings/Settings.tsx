@@ -5,9 +5,16 @@
  */
 import { useEffect, useState } from 'react';
 
-import { api, type ActionKind, type AppConfig, type ModelConfig, type SystemInfo, type Thinking } from '../api';
+import { api, type ActionKind, type AppConfig, type ModelConfig, type SystemInfo, type Thinking, type VoiceInfo } from '../api';
 
 /** 工具栏动作的固定渲染顺序与文案（与后端 CANONICAL_ACTIONS 对应）。 */
+/** 候选排序：中文最前、英文次之、其余靠后。 */
+function localeRank(locale: string): number {
+  if (locale.startsWith('zh')) return 0;
+  if (locale.startsWith('en')) return 1;
+  return 2;
+}
+
 const TOOLBAR_ACTIONS: { kind: ActionKind; label: string }[] = [
   { kind: 'search', label: 'AI 搜索' },
   { kind: 'translate', label: '翻译' },
@@ -43,11 +50,25 @@ export function Settings() {
   const [status, setStatus] = useState('');
   /** cc-switch 导入的候选，挑中才进模型列表 */
   const [candidates, setCandidates] = useState<ModelConfig[] | null>(null);
+  /** 系统已装的音色，中文的排前面 */
+  const [voices, setVoices] = useState<VoiceInfo[]>([]);
 
   useEffect(() => {
     api.getConfig().then(setConfig).catch((e) => setStatus(String(e)));
     api.getAppVersion().then(setVersion).catch(() => {});
     api.getSystemInfo().then(setSys).catch(() => {});
+    // 音色列表只用于候选展示，拉不到也不挡设置。中文排最前，方便挑。
+    api.listVoices()
+      .then((vs) =>
+        setVoices(
+          [...vs].sort(
+            (a, b) =>
+              localeRank(a.locale) - localeRank(b.locale) ||
+              a.name.localeCompare(b.name),
+          ),
+        ),
+      )
+      .catch(() => {});
 
     // 权限可能在 App 运行期间被授予，轮询刷新状态。
     const check = () => api.accessibilityTrusted().then(setTrusted).catch(() => {});
@@ -100,6 +121,15 @@ export function Settings() {
     // 第一个加进来的模型自动设成主模型和启用
     const firstEver = config.models.length === 0;
     patch({ models: [...config.models, { ...c, enabled: true, primary: firstEver }] });
+  };
+
+  const previewVoice = async () => {
+    try {
+      await api.previewVoice(config.tts_voice, config.tts_rate);
+    } catch (e) {
+      setStatus(String(e));
+      window.setTimeout(() => setStatus(''), 2500);
+    }
   };
 
   const checkUpdate = async () => {
@@ -308,6 +338,45 @@ export function Settings() {
             </div>
           </div>
         ))}
+      </section>
+
+      <section className="card">
+        <h2>朗读</h2>
+        <p className="hint">
+          中文建议选 zh_CN 音色（如 Tingting / Yu-shu）。更多/更高质的音色在
+          「系统设置 → 辅助功能 → 朗读内容 → 系统声音」里下载，装好后重开设置页。
+        </p>
+        <label className="row">
+          <span>音色</span>
+          <input
+            list="tts-voices"
+            value={config.tts_voice}
+            onChange={(e) => patch({ tts_voice: e.target.value })}
+            placeholder={`跟随系统${voices.length ? `（共 ${voices.length} 个可选）` : ''}`}
+          />
+          <datalist id="tts-voices">
+            {voices.map((v) => (
+              <option key={v.name + v.locale} value={v.name}>
+                {v.locale}
+              </option>
+            ))}
+          </datalist>
+        </label>
+        <label className="row">
+          <span>语速</span>
+          <input
+            type="number"
+            min={0}
+            max={400}
+            step={5}
+            value={config.tts_rate}
+            onChange={(e) => patch({ tts_rate: Number(e.target.value) })}
+          />
+          <em>0 = 默认（约 175），数字越大越快</em>
+        </label>
+        <div className="btn-row">
+          <button onClick={previewVoice}>试听（用当前表单值）</button>
+        </div>
       </section>
 
       <section className="card">
