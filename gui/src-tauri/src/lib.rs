@@ -61,6 +61,13 @@ pub fn run() {
                     .app_handle()
                     .set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
+            // 用户拖动工具栏后同步几何缓存（命中测试 + 锚点），否则拖走后
+            // 点自己面板上的按钮会被当成点在外面、面板当场消失。
+            if window.label() == panel::SPOTLIGHT
+                && let WindowEvent::Moved(pos) = event
+            {
+                panel::sync_moved(window.app_handle(), (pos.x, pos.y));
+            }
         })
         .invoke_handler(tauri::generate_handler![
             actions::run_action,

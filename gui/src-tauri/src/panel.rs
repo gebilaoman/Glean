@@ -190,6 +190,31 @@ pub fn set_height(app: &AppHandle, height: f64) {
     });
 }
 
+/// 窗口被挪动（通常是用户拖拽手柄）后同步几何缓存。
+///
+/// 不同步的后果有两个：命中测试还拿着旧位置——拖走后点自己面板上的按钮
+/// 会被当成「点在面板外」，面板当场消失；展开/收起（`set_height` 重摆）也会
+/// 用旧锚点把窗口拽回划词时的位置。锚点跟着窗口当前顶部走，后续重摆就地展开。
+/// 对我们自己的 reposition 触发的 Moved 是幂等的（算回同一个锚点）。
+pub fn sync_moved(app: &AppHandle, physical: (i32, i32)) {
+    let Some(window) = spotlight(app) else { return };
+    let scale = window.scale_factor().unwrap_or(1.0).max(1.0);
+    let x = physical.0 as f64 / scale;
+    let y = physical.1 as f64 / scale;
+
+    let geo = &app.state::<AppState>().geometry;
+    let height = geo.height();
+    // set_anchor 会把高度重置成收起态，先存后还。
+    geo.set_anchor(x + WIDTH / 2.0, y - GAP);
+    geo.set_height(height);
+    geo.set_rect(Rect {
+        x,
+        y,
+        w: WIDTH,
+        h: height,
+    });
+}
+
 /// 把设置窗摆到「用户正在用的那块屏」的中央。
 ///
 /// Tauri 的 `center()` 是按窗口**当前**所在屏居中的，而系统常把新窗口丢到副屏，
