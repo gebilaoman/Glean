@@ -590,6 +590,13 @@ body[data-window='settings'] {
   min-width: 0;
 }
 
+.model-pick .refresh {
+  min-width: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .model-grid select {
   height: 32px;
   padding: 0 8px;

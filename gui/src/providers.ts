@@ -42,6 +42,21 @@ export const PROVIDERS: ProviderPreset[] = [
     needsKey: true,
   },
   {
+    id: 'moonshot',
+    label: '月之暗面 Kimi',
+    endpoint: 'https://api.moonshot.cn/v1',
+    // 兜底清单；贴上 Key 点「刷新」会拉到全量（kimi 系/长文本系）
+    models: ['kimi-k2-0905-preview', 'kimi-k2-0711-preview', 'moonshot-v1-8k'],
+    needsKey: true,
+  },
+  {
+    id: 'qwen',
+    label: '通义千问',
+    endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    models: ['qwen-max', 'qwen-plus', 'qwen-turbo'],
+    needsKey: true,
+  },
+  {
     id: 'ollama',
     label: 'Ollama（本地）',
     endpoint: 'http://localhost:11434/v1',

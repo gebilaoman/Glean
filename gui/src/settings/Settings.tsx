@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 
 import { api, type ActionKind, type AppConfig, type ModelConfig, type SystemInfo, type Thinking, type VoiceInfo } from '../api';
-import { Chevron } from '../icons';
+import { Chevron, Spinner } from '../icons';
 import { PROVIDERS, inferProvider, type ProviderPreset } from '../providers';
 
 /** 工具栏动作的固定渲染顺序与文案（与后端 CANONICAL_ACTIONS 对应）。 */
@@ -65,6 +65,8 @@ export function Settings() {
   const [voices, setVoices] = useState<VoiceInfo[]>([]);
   /** 每个模型卡的模型候选（实时拉取结果），键是模型 id */
   const [modelOptions, setModelOptions] = useState<Record<string, string[]>>({});
+  /** 各模型卡的「刷新」是否在拉取中 */
+  const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     api.getConfig().then(setConfig).catch((e) => setStatus(String(e)));
@@ -102,11 +104,14 @@ export function Settings() {
   /** 从服务拉真实模型清单，填进对应模型卡的候选。拉不到就静默保持预设。 */
   const refreshModels = async (endpoint: string, apiKey: string, modelId: string) => {
     if (!endpoint.trim()) return;
+    setRefreshing((prev) => ({ ...prev, [modelId]: true }));
     try {
       const list = await api.fetchModels(endpoint, apiKey);
       setModelOptions((prev) => ({ ...prev, [modelId]: list }));
     } catch {
       // 留着预设清单
+    } finally {
+      setRefreshing((prev) => ({ ...prev, [modelId]: false }));
     }
   };
 
@@ -391,10 +396,12 @@ export function Settings() {
                   ))}
                 </datalist>
                 <button
+                  className="refresh"
                   title="从服务拉取模型列表"
+                  disabled={refreshing[m.id]}
                   onClick={() => refreshModels(m.endpoint, m.api_key, m.id)}
                 >
-                  刷新
+                  {refreshing[m.id] ? <Spinner size={12} /> : '刷新'}
                 </button>
               </div>
               <select
