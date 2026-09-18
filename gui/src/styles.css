@@ -380,6 +380,30 @@ body[data-window='settings'] {
   font-size: 13px;
 }
 
+.rate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.rate input[type='range'] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.rate-cap,
+.rate-value {
+  font-size: 12px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+
+.rate-value {
+  min-width: 96px;
+  text-align: right;
+}
+
 .settings .row.check {
   gap: 8px;
 }

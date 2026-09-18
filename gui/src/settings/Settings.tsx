@@ -8,6 +8,15 @@ import { useEffect, useState } from 'react';
 import { api, type ActionKind, type AppConfig, type ModelConfig, type SystemInfo, type Thinking, type VoiceInfo } from '../api';
 
 /** 工具栏动作的固定渲染顺序与文案（与后端 CANONICAL_ACTIONS 对应）。 */
+/** say 的默认语速（约 175 字/分）。滑杆 0 居中 = 跟随默认。 */
+const DEFAULT_RATE = 175;
+
+/** 绝对语速 → 滑杆偏移（0 在中间）。旧配置里超范围的值夹到边界。 */
+function rateOffset(rate: number): number {
+  if (rate === 0) return 0;
+  return Math.max(-100, Math.min(100, rate - DEFAULT_RATE));
+}
+
 /** 候选排序：中文最前、英文次之、其余靠后。 */
 function localeRank(locale: string): number {
   if (locale.startsWith('zh')) return 0;
@@ -362,18 +371,28 @@ export function Settings() {
             ))}
           </datalist>
         </label>
-        <label className="row">
+        <div className="row">
           <span>语速</span>
-          <input
-            type="number"
-            min={0}
-            max={400}
-            step={5}
-            value={config.tts_rate}
-            onChange={(e) => patch({ tts_rate: Number(e.target.value) })}
-          />
-          <em>0 = 默认（约 175），数字越大越快</em>
-        </label>
+          <div className="rate">
+            <span className="rate-cap">慢</span>
+            <input
+              type="range"
+              min={-100}
+              max={100}
+              step={5}
+              value={rateOffset(config.tts_rate)}
+              onChange={(e) => {
+                const offset = Number(e.target.value);
+                // 0（中间）存成 0 = 跟随系统默认；否则存绝对值 175±偏移
+                patch({ tts_rate: offset === 0 ? 0 : DEFAULT_RATE + offset });
+              }}
+            />
+            <span className="rate-cap">快</span>
+            <span className="rate-value">
+              {config.tts_rate === 0 ? '默认（约 175）' : `${config.tts_rate} 字/分`}
+            </span>
+          </div>
+        </div>
         <div className="btn-row">
           <button onClick={previewVoice}>试听（用当前表单值）</button>
         </div>
