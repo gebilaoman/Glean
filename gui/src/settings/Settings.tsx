@@ -5,7 +5,16 @@
  */
 import { useEffect, useState } from 'react';
 
-import { api, type AppConfig, type ModelConfig, type SystemInfo } from '../api';
+import { api, type AppConfig, type ModelConfig, type SystemInfo, type Thinking } from '../api';
+
+/** 思考强度选项。文案里写清各档的代价，免得用户要去翻文档。 */
+const THINKING_OPTIONS: { value: Thinking; label: string }[] = [
+  { value: 'auto', label: '思考：默认' },
+  { value: 'off', label: '思考：关闭' },
+  { value: 'low', label: '思考：低' },
+  { value: 'high', label: '思考：高' },
+  { value: 'max', label: '思考：最高' },
+];
 
 const blankModel = (): ModelConfig => ({
   id: crypto.randomUUID().slice(0, 8),
@@ -15,6 +24,7 @@ const blankModel = (): ModelConfig => ({
   api_key: '',
   enabled: true,
   primary: false,
+  thinking: 'auto',
 });
 
 export function Settings() {
@@ -185,6 +195,10 @@ export function Settings() {
         <p className="hint">
           兼容所有 OpenAI 协议的服务。端点填到 <code>/v1</code> 为止，本地服务通常不需要 API Key。
           启用多个即可并排对比。
+          <br />
+          「思考」默认不发任何参数、用服务端默认值。GLM-5.3 起始终思考且默认最高档，
+          划词这种小任务选<strong>低</strong>会快很多；老的 GLM 推理模型才用得上
+          <strong>关闭</strong>，对 5.3 发关闭会直接报 400。
         </p>
         {candidates && (
           <div className="candidates">
@@ -258,6 +272,16 @@ export function Settings() {
                 onChange={(e) => patchModel(i, { api_key: e.target.value })}
                 placeholder="API Key（本地服务可留空）"
               />
+              <select
+                value={m.thinking ?? 'auto'}
+                onChange={(e) => patchModel(i, { thinking: e.target.value as Thinking })}
+              >
+                {THINKING_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         ))}

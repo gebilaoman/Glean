@@ -4,6 +4,9 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 export type ActionKind = 'translate' | 'explain' | 'search' | 'copy' | 'save';
 
+/** 思考强度。auto = 不发任何思考参数（兼容性最好）。 */
+export type Thinking = 'auto' | 'off' | 'low' | 'high' | 'max';
+
 export interface ModelConfig {
   id: string;
   name: string;
@@ -12,6 +15,7 @@ export interface ModelConfig {
   api_key: string;
   enabled: boolean;
   primary: boolean;
+  thinking: Thinking;
 }
 
 export interface AppConfig {

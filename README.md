@@ -64,7 +64,8 @@ cd gui && pnpm tauri:build # 出包
       "model": "qwen3:8b",
       "api_key": "",
       "enabled": true,
-      "primary": true
+      "primary": true,
+      "thinking": "auto"
     }
   ],
   "target_lang": "中文",
@@ -75,6 +76,12 @@ cd gui && pnpm tauri:build # 出包
 }
 ```
 
+- `thinking`：思考强度，`auto`（默认，什么都不发）/ `off` / `low` / `high` / `max`。
+  各家推理模型的开关方式不统一，所以不猜、交给你按模型选：
+  - `off` 发 `thinking:{type:"disabled"}`，只有**老的** GLM 推理模型吃这一套；
+    **GLM-5.3 起始终思考**，发关闭会直接 400（code 1210）。
+  - `low`/`high`/`max` 发 `thinking:{type:"enabled"}` + `reasoning_effort`。
+    GLM-5.3 不传时默认走 `max`，划词这种小任务选 `low` 快很多。
 - `drag_threshold`：位移小于它的鼠标动作当普通点击丢弃。
 - `settle_ms`：松开鼠标到取词之间的等待。太短会读到上一次的选区，觉得取词「慢半拍」就调大它。
 - 保存动作按天追加到 `save_dir/YYYY-MM-DD.md`，留空则用 `~/Documents/Glean`。

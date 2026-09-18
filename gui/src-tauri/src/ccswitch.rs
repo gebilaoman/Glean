@@ -113,6 +113,8 @@ pub fn import_cc_switch() -> Result<Vec<ModelConfig>, String> {
             api_key: token,
             enabled: false,
             primary: false,
+            // 思考参数各家写法不一，导入时一律不发，由用户在设置页里按模型选。
+            thinking: glean_core::Thinking::Auto,
         });
     }
 

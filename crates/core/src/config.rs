@@ -2,6 +2,36 @@
 
 use serde::{Deserialize, Serialize};
 
+/// 思考强度。各家推理模型的开关方式不统一，这里统一成一个枚举，由用户按模型选。
+///
+/// - `Auto`：什么都不发，用服务端默认。兼容性最好，但 GLM-5.3 的默认是 `max`，很慢。
+/// - `Off`：发 `thinking:{type:"disabled"}`。老的 GLM 推理模型靠它关思考；
+///   **GLM-5.3 起不再支持关闭**，发了会返回 400 / code 1210。
+/// - `Low` / `High` / `Max`：发 `thinking:{type:"enabled"}` + `reasoning_effort`。
+///   划词翻译这种小任务选 `Low` 就够，延迟差别很大。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Thinking {
+    #[default]
+    Auto,
+    Off,
+    Low,
+    High,
+    Max,
+}
+
+impl Thinking {
+    /// 对应 `reasoning_effort` 的取值；`Auto` / `Off` 不走这条路，返回 None。
+    pub fn effort(self) -> Option<&'static str> {
+        match self {
+            Thinking::Low => Some("low"),
+            Thinking::High => Some("high"),
+            Thinking::Max => Some("max"),
+            Thinking::Auto | Thinking::Off => None,
+        }
+    }
+}
+
 /// 一个可调用的模型端点。多模型对比就是把同一段文本并发发给列表里的每一项。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
@@ -22,6 +52,9 @@ pub struct ModelConfig {
     /// 主模型在结果区默认展开，其余折叠。列表里应当只有一个为 true。
     #[serde(default)]
     pub primary: bool,
+    /// 思考强度。老配置里没有这个字段，缺省为 `Auto`（什么都不发）。
+    #[serde(default)]
+    pub thinking: Thinking,
 }
 
 fn default_true() -> bool {
@@ -83,6 +116,7 @@ impl Default for AppConfig {
                 api_key: String::new(),
                 enabled: true,
                 primary: true,
+                thinking: Thinking::Auto,
             }],
             target_lang: default_target_lang(),
             drag_threshold: default_drag_threshold(),

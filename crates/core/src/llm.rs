@@ -7,7 +7,7 @@
 use futures::StreamExt;
 use serde::Serialize;
 
-use crate::config::ModelConfig;
+use crate::config::{ModelConfig, Thinking};
 use crate::think::ThinkFilter;
 
 /// 流式回调收到的事件。
@@ -19,6 +19,37 @@ pub enum StreamEvent {
     Done,
     /// 出错（网络、鉴权、模型名不对等），附人类可读原因。
     Error(String),
+}
+
+/// 拼请求体。抽出来单独放是为了能单测——思考参数各家写法不一，很容易写错。
+fn build_body(model: &ModelConfig, system: &str, user: &str) -> serde_json::Value {
+    let mut body = serde_json::json!({
+        "model": model.model,
+        "stream": true,
+        "temperature": 0.2,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": user },
+        ],
+    });
+
+    // 思考参数不能瞎猜着发：GLM-5.3 起「始终思考」，收到 disabled 会 400（code 1210）；
+    // 而不发 reasoning_effort 时它默认走 max，划词这种小任务会慢得没法用。
+    // 所以交给用户按模型选，默认 Auto = 什么都不发。
+    match model.thinking {
+        Thinking::Auto => {}
+        Thinking::Off => {
+            body["thinking"] = serde_json::json!({ "type": "disabled" });
+        }
+        level => {
+            body["thinking"] = serde_json::json!({ "type": "enabled" });
+            if let Some(effort) = level.effort() {
+                body["reasoning_effort"] = serde_json::json!(effort);
+            }
+        }
+    }
+
+    body
 }
 
 /// 发一次流式请求，每拿到一段增量就回调一次 `on_event`。
@@ -38,20 +69,7 @@ pub async fn stream_chat<F>(
         "{}/chat/completions",
         model.endpoint.trim_end_matches('/')
     );
-    let mut body = serde_json::json!({
-        "model": model.model,
-        "stream": true,
-        "temperature": 0.2,
-        "messages": [
-            { "role": "system", "content": system },
-            { "role": "user", "content": user },
-        ],
-    });
-    // 智谱 GLM 的推理模型默认开思考，划词翻译这种小任务会从 1~2 秒拖到几十秒甚至几分钟。
-    // `thinking` 是智谱特有字段，别的厂商收到会 400，所以只对 bigmodel.cn 发。
-    if model.endpoint.contains("bigmodel.cn") {
-        body["thinking"] = serde_json::json!({ "type": "disabled" });
-    }
+    let body = build_body(model, system, user);
 
     let mut req = client.post(&url).json(&body);
     if !model.api_key.trim().is_empty() {
@@ -128,4 +146,54 @@ pub async fn stream_chat<F>(
         on_event(StreamEvent::Delta(tail));
     }
     on_event(StreamEvent::Done);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_body;
+    use crate::config::{ModelConfig, Thinking};
+
+    fn model(thinking: Thinking) -> ModelConfig {
+        ModelConfig {
+            id: "m".into(),
+            name: "m".into(),
+            endpoint: "https://open.bigmodel.cn/api/paas/v4".into(),
+            model: "glm-5.3".into(),
+            api_key: String::new(),
+            enabled: true,
+            primary: true,
+            thinking,
+        }
+    }
+
+    #[test]
+    fn auto_sends_no_thinking_params() {
+        let b = build_body(&model(Thinking::Auto), "s", "u");
+        assert!(b.get("thinking").is_none());
+        assert!(b.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn off_sends_disabled() {
+        let b = build_body(&model(Thinking::Off), "s", "u");
+        assert_eq!(b["thinking"]["type"], "disabled");
+        // 关思考时不该再带强度
+        assert!(b.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn level_sends_enabled_plus_effort() {
+        let b = build_body(&model(Thinking::Low), "s", "u");
+        assert_eq!(b["thinking"]["type"], "enabled");
+        assert_eq!(b["reasoning_effort"], "low");
+    }
+
+    #[test]
+    fn always_streams() {
+        let b = build_body(&model(Thinking::Max), "s", "u");
+        assert_eq!(b["stream"], true);
+        assert_eq!(b["model"], "glm-5.3");
+        assert_eq!(b["messages"][0]["content"], "s");
+        assert_eq!(b["messages"][1]["content"], "u");
+    }
 }

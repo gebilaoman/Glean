@@ -480,8 +480,19 @@ body[data-window='settings'] {
 
 .model-grid {
   display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr;
+  grid-template-columns: 1.5fr 1fr 1fr auto;
   gap: 8px;
+}
+
+.model-grid select {
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #1a1a1d;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
 }
 
 .settings .mono {

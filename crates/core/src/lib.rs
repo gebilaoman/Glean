@@ -7,6 +7,6 @@ pub mod config;
 pub mod llm;
 pub mod think;
 
-pub use config::{ActionKind, AppConfig, ModelConfig};
+pub use config::{ActionKind, AppConfig, ModelConfig, Thinking};
 pub use llm::{StreamEvent, stream_chat};
 pub use think::ThinkFilter;
