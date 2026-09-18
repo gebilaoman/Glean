@@ -158,6 +158,10 @@ pub fn open_settings(app: AppHandle) -> Result<(), String> {
     // Accessory 策略下窗口拿不到焦点，开设置时临时切回 Regular（关窗时切回去）。
     #[cfg(target_os = "macos")]
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    // 只在它当前没显示时摆位，免得用户自己挪过位置又被拽回中间。
+    if !window.is_visible().unwrap_or(false) {
+        panel::center_settings(&app);
+    }
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
     Ok(())

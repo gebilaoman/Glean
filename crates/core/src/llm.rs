@@ -8,6 +8,7 @@ use futures::StreamExt;
 use serde::Serialize;
 
 use crate::config::ModelConfig;
+use crate::think::ThinkFilter;
 
 /// 流式回调收到的事件。
 #[derive(Debug, Clone, Serialize)]
@@ -37,7 +38,7 @@ pub async fn stream_chat<F>(
         "{}/chat/completions",
         model.endpoint.trim_end_matches('/')
     );
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "model": model.model,
         "stream": true,
         "temperature": 0.2,
@@ -46,6 +47,11 @@ pub async fn stream_chat<F>(
             { "role": "user", "content": user },
         ],
     });
+    // 智谱 GLM 的推理模型默认开思考，划词翻译这种小任务会从 1~2 秒拖到几十秒甚至几分钟。
+    // `thinking` 是智谱特有字段，别的厂商收到会 400，所以只对 bigmodel.cn 发。
+    if model.endpoint.contains("bigmodel.cn") {
+        body["thinking"] = serde_json::json!({ "type": "disabled" });
+    }
 
     let mut req = client.post(&url).json(&body);
     if !model.api_key.trim().is_empty() {
@@ -71,6 +77,8 @@ pub async fn stream_chat<F>(
     // SSE 分片不保证按行对齐，用 buf 攒着按 \n 切。
     let mut stream = resp.bytes_stream();
     let mut buf = String::new();
+    // MiniMax 这类模型把思考直接写进 content，边流边剪掉。
+    let mut think = ThinkFilter::default();
     while let Some(chunk) = stream.next().await {
         let chunk = match chunk {
             Ok(c) => c,
@@ -92,6 +100,10 @@ pub async fn stream_chat<F>(
                 continue;
             }
             if payload == "[DONE]" {
+                let tail = think.finish();
+                if !tail.is_empty() {
+                    on_event(StreamEvent::Delta(tail));
+                }
                 on_event(StreamEvent::Done);
                 return;
             }
@@ -102,11 +114,18 @@ pub async fn stream_chat<F>(
             if let Some(delta) = v["choices"][0]["delta"]["content"].as_str()
                 && !delta.is_empty()
             {
-                on_event(StreamEvent::Delta(delta.to_string()));
+                let visible = think.feed(delta);
+                if !visible.is_empty() {
+                    on_event(StreamEvent::Delta(visible));
+                }
             }
         }
     }
 
     // 有的服务流结束不发 [DONE]，直接断开，这里补一个正常结束。
+    let tail = think.finish();
+    if !tail.is_empty() {
+        on_event(StreamEvent::Delta(tail));
+    }
     on_event(StreamEvent::Done);
 }

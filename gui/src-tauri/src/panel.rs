@@ -59,7 +59,8 @@ impl PanelGeometry {
         inner.height = COLLAPSED_HEIGHT;
     }
 
-    fn anchor(&self) -> (f64, f64) {
+    /// 最近一次划词的光标位置。用来决定设置窗该开在哪块屏。
+    pub fn anchor(&self) -> (f64, f64) {
         self.inner.lock().anchor
     }
 
@@ -185,6 +186,32 @@ pub fn set_height(app: &AppHandle, height: f64) {
         if let Err(e) = reposition(app, geo) {
             eprintln!("[glean] 调整工具栏高度失败：{e}");
         }
+    });
+}
+
+/// 把设置窗摆到「用户正在用的那块屏」的中央。
+///
+/// Tauri 的 `center()` 是按窗口**当前**所在屏居中的，而系统常把新窗口丢到副屏，
+/// 结果就是在主屏划词、设置窗却开在另一块屏上。这里按最近一次划词的光标位置选屏。
+pub fn center_settings(app: &AppHandle) {
+    on_main(app, |app| {
+        let Some(settings) = app.get_webview_window("settings") else {
+            return;
+        };
+        let (cx, cy) = app.state::<AppState>().geometry.anchor();
+        let monitor = settings
+            .monitor_from_point(cx, cy)
+            .ok()
+            .flatten()
+            .or_else(|| settings.primary_monitor().ok().flatten());
+        let Some(monitor) = monitor else { return };
+
+        let Ok(size) = settings.outer_size() else { return };
+        let mpos = monitor.position();
+        let msize = monitor.size();
+        let x = mpos.x + (msize.width as i32 - size.width as i32) / 2;
+        let y = mpos.y + (msize.height as i32 - size.height as i32) / 2;
+        let _ = settings.set_position(PhysicalPosition::new(x, y));
     });
 }
 
