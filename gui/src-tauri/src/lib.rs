@@ -9,7 +9,6 @@
 mod actions;
 mod ccswitch;
 mod config;
-mod cursor;
 mod panel;
 mod selection;
 mod state;

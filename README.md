@@ -9,7 +9,7 @@
 
 | 层 | 位置 | 做什么 |
 | --- | --- | --- |
-| 触发 | `gui/src-tauri/src/selection.rs` | `rdev` 全局鼠标钩子，把 mousedown/mouseup 合成「拖选」「双击选词」手势 |
+| 触发 | `gui/src-tauri/src/selection.rs` | 自建 CGEventTap（只订阅左键按下/松开），把 mousedown/mouseup 合成「拖选」「双击选词」手势 |
 | 取词 | 同上 | `get-selected-text`：macOS AX / Windows UIA，取不到时回落模拟 `Cmd+C` |
 | 悬浮窗 | `gui/src-tauri/src/panel.rs` | `tauri-nspanel` 把窗口换成非激活 `NSPanel`，光标处定位、边缘翻转 |
 | 动作 | `gui/src-tauri/src/actions.rs` | 多模型并发流式调用（OpenAI 兼容），复制与保存走本地 |
@@ -110,3 +110,19 @@ cd gui && pnpm tauri signer generate -w ~/.tauri/glean.key
 - 取词对自绘 UI（部分 Electron 应用、游戏）可能失败，这时会回落到模拟复制；
   再失败就静默放弃，不弹窗。
 - 朗读（TTS）尚未实现。
+
+## 为什么没用 rdev
+
+设计文档里原本选的是 `rdev` 做全局鼠标钩子，实际用下来有两个硬伤，所以换成了自建
+CGEventTap（`selection.rs`）：
+
+1. **敲键盘会让进程崩溃。** rdev 0.5.3 的事件掩码写死了，把键盘事件也一并订阅，
+   而它的 `convert()` 会调 HIToolbox 的 `TSMGetInputSourceProperty` 查键盘布局——
+   那个 API 断言必须跑在主队列上，事件 tap 却在自己的线程上，于是只要工具开着时
+   敲一下键盘就 SIGTRAP。掩码不可配，绕不过去。
+2. **拖拽期间拿不到坐标。** rdev 的 macOS `convert()` 只处理 `kCGEventMouseMoved`，
+   把 `kCGEventLeftMouseDragged` 丢掉了，按住左键拖动的整个过程一个坐标都不给，
+   拿它算拖选位移永远是 0——划词根本不会触发。
+
+自建 tap 只订阅 `LeftMouseDown` / `LeftMouseUp`，坐标直接取自事件本身，两个问题一起没了；
+另外还处理了 `TapDisabledByTimeout`（系统停掉 tap 后自动重新启用）。
