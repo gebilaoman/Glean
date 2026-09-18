@@ -52,7 +52,9 @@ cd gui && pnpm tauri:build # 出包
 加进来之后核对一下端点和模型名。
 
 模型清单是一个数组，端点填到 `/v1` 为止，兼容 llama.cpp / Ollama / vLLM /
-智谱 / DeepSeek / OpenRouter：
+智谱 / DeepSeek / OpenRouter。**列表顺序就是优先级**：结果区按这个顺序排列，
+第一个启用的模型默认展开；设置页用模型卡片上的 ↑↓ 调整顺序
+（`primary` 字段已废弃，仅为兼容旧配置保留）：
 
 ```json
 {
@@ -64,7 +66,7 @@ cd gui && pnpm tauri:build # 出包
       "model": "qwen3:8b",
       "api_key": "",
       "enabled": true,
-      "primary": true,
+      "primary": false,
       "thinking": "auto"
     }
   ],

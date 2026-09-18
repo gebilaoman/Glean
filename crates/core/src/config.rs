@@ -49,7 +49,8 @@ pub struct ModelConfig {
     /// 是否参与多模型对比。关掉的模型仍保留在配置里。
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// 主模型在结果区默认展开，其余折叠。列表里应当只有一个为 true。
+    /// 【已废弃】顺序即优先级：第一个启用的模型就是结果区默认展开的主模型。
+    /// 字段保留只为旧配置能正常反序列化，不再有任何效果。
     #[serde(default)]
     pub primary: bool,
     /// 思考强度。老配置里没有这个字段，缺省为 `Auto`（什么都不发）。
@@ -155,11 +156,10 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
-    /// 参与对比的模型，主模型排在最前（前端据此决定默认展开哪一列）。
+    /// 参与对比的模型，按配置顺序返回——顺序即优先级，
+    /// 第一个就是结果区默认展开的那列（设置页可上下调整顺序）。
     pub fn active_models(&self) -> Vec<&ModelConfig> {
-        let mut list: Vec<&ModelConfig> = self.models.iter().filter(|m| m.enabled).collect();
-        list.sort_by_key(|m| !m.primary);
-        list
+        self.models.iter().filter(|m| m.enabled).collect()
     }
 }
 
@@ -220,5 +220,19 @@ mod tests {
             2
         );
         assert!(cfg.actions.contains(&ActionKind::Speak));
+    }
+
+    /// 顺序即优先级：按配置顺序过滤启用项；primary 不再影响顺序。
+    #[test]
+    fn active_models_follow_config_order() {
+        let base = AppConfig::default().models.remove(0);
+        let mut cfg = AppConfig::default();
+        cfg.models = vec![
+            ModelConfig { id: "a".into(), enabled: false, ..base.clone() },
+            ModelConfig { id: "b".into(), enabled: true, ..base.clone() },
+            ModelConfig { id: "c".into(), enabled: true, primary: true, ..base },
+        ];
+        let ids: Vec<&str> = cfg.active_models().iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["b", "c"]);
     }
 }

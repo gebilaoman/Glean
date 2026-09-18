@@ -524,6 +524,36 @@ body[data-window='settings'] {
   flex: 1;
 }
 
+.model-top .move {
+  display: flex;
+  gap: 4px;
+}
+
+.model-top .move button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+}
+
+.model-top .move button:disabled {
+  opacity: 0.35;
+}
+
+.model-top .rot {
+  display: inline-flex;
+}
+
+.model-top .rot.up {
+  transform: rotate(-90deg);
+}
+
+.model-top .rot.down {
+  transform: rotate(90deg);
+}
+
 .model-top .check {
   display: flex;
   align-items: center;

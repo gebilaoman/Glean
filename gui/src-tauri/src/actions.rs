@@ -64,7 +64,16 @@ pub async fn run_action(
         return Err("没有启用任何模型，请先到设置里配置".into());
     }
 
-    let briefs: Vec<ModelBrief> = models.iter().map(ModelBrief::from).collect();
+    // 顺序即优先级：第一个标成主模型，结果区默认展开它（见 active_models）。
+    let briefs: Vec<ModelBrief> = models
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let mut b = ModelBrief::from(m);
+            b.primary = i == 0;
+            b
+        })
+        .collect();
     let system = system_prompt(action, &target_lang);
 
     for model in models {

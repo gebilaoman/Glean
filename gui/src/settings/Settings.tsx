@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react';
 
 import { api, type ActionKind, type AppConfig, type ModelConfig, type SystemInfo, type Thinking, type VoiceInfo } from '../api';
+import { Chevron } from '../icons';
 
 /** 工具栏动作的固定渲染顺序与文案（与后端 CANONICAL_ACTIONS 对应）。 */
 /** say 的默认语速（约 175 字/分）。滑杆 0 居中 = 跟随默认。 */
@@ -92,12 +93,15 @@ export function Settings() {
 
   const patchModel = (idx: number, p: Partial<ModelConfig>) => {
     const models = config.models.map((m, i) => (i === idx ? { ...m, ...p } : m));
-    // 主模型唯一：设了新的就把别人的取消掉。
-    if (p.primary) {
-      models.forEach((m, i) => {
-        if (i !== idx) m.primary = false;
-      });
-    }
+    patch({ models });
+  };
+
+  /** 上/下移模型：顺序即优先级，第一个启用的模型默认展开。 */
+  const moveModel = (idx: number, dir: -1 | 1) => {
+    const to = idx + dir;
+    if (to < 0 || to >= config.models.length) return;
+    const models = [...config.models];
+    [models[idx], models[to]] = [models[to], models[idx]];
     patch({ models });
   };
 
@@ -127,9 +131,7 @@ export function Settings() {
   const adoptCandidate = (c: ModelConfig) => {
     // 同 id 已经加过就跳过，避免重复点
     if (config.models.some((m) => m.id === c.id)) return;
-    // 第一个加进来的模型自动设成主模型和启用
-    const firstEver = config.models.length === 0;
-    patch({ models: [...config.models, { ...c, enabled: true, primary: firstEver }] });
+    patch({ models: [...config.models, { ...c, enabled: true }] });
   };
 
   const previewVoice = async () => {
@@ -256,7 +258,8 @@ export function Settings() {
         </div>
         <p className="hint">
           兼容所有 OpenAI 协议的服务。端点填到 <code>/v1</code> 为止，本地服务通常不需要 API Key。
-          启用多个即可并排对比。
+          启用多个即可并排对比；列表顺序就是结果区顺序，第一个启用的默认展开，用卡片上的
+          ↑↓ 调整。
           <br />
           「思考」默认不发任何参数、用服务端默认值。GLM-5.3 起始终思考且默认最高档，
           划词这种小任务选<strong>低</strong>会快很多；老的 GLM 推理模型才用得上
@@ -301,15 +304,22 @@ export function Settings() {
                 />
                 <span>启用</span>
               </label>
-              <label className="check">
-                <input
-                  type="radio"
-                  name="primary"
-                  checked={m.primary}
-                  onChange={() => patchModel(i, { primary: true })}
-                />
-                <span>主模型</span>
-              </label>
+              <div className="move">
+                <button title="上移" disabled={i === 0} onClick={() => moveModel(i, -1)}>
+                  <span className="rot up">
+                    <Chevron size={11} />
+                  </span>
+                </button>
+                <button
+                  title="下移"
+                  disabled={i === config.models.length - 1}
+                  onClick={() => moveModel(i, 1)}
+                >
+                  <span className="rot down">
+                    <Chevron size={11} />
+                  </span>
+                </button>
+              </div>
               <button
                 className="danger"
                 onClick={() => patch({ models: config.models.filter((_, j) => j !== i) })}
