@@ -11,6 +11,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use crate::config;
 use crate::panel;
+use crate::state::SpeechTick;
 use crate::state::AppState;
 
 /// 给前端的模型简介，用来预先把结果区的列排好。
@@ -178,6 +179,63 @@ pub fn save_selection(state: State<'_, AppState>) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+/// 朗读划词文本；再点一次停止（toggle）。正在朗读时按钮亮着。
+///
+/// macOS 直接调系统的 `say`（AVSpeechSynthesizer 的命令行前端），零依赖；
+/// 「停」就是杀子进程。看护线程每 200ms `try_wait` 一次，念完自然收尾并通知前端。
+#[tauri::command]
+pub fn speak_selection(app: AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
+    // 已经在念 → 这次点的是「停」
+    if state.stop_speech() {
+        let _ = app.emit("tts-stopped", ());
+        return Ok(false);
+    }
+
+    let text = state.selection();
+    if text.is_empty() {
+        return Err("没有可朗读的文本".into());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::{Command, Stdio};
+
+        let child = Command::new("say")
+            .arg(&text)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("启动朗读失败：{e}"))?;
+        let round = state.start_speech(child);
+        let _ = app.emit("tts-started", ());
+
+        let handle = app.clone();
+        std::thread::spawn(move || {
+            // State<'_> 的借用带不进线程，用 AppHandle 重新拿一份
+            let state = handle.state::<AppState>();
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                match state.speech_tick(round) {
+                    SpeechTick::Running => continue,
+                    SpeechTick::Done => {
+                        let _ = handle.emit("tts-stopped", ());
+                        return;
+                    }
+                    // 被停/被换：停的那条路径自己会发事件
+                    SpeechTick::Gone => return,
+                }
+            }
+        });
+        Ok(true)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("当前平台暂不支持朗读".into())
+    }
+}
+
 #[tauri::command]
 pub fn hide_panel(app: AppHandle) {
     panel::hide(&app);
@@ -213,11 +271,14 @@ pub fn get_config(state: State<'_, AppState>) -> glean_core::AppConfig {
 
 #[tauri::command]
 pub fn save_config(
+    app: AppHandle,
     state: State<'_, AppState>,
     config: glean_core::AppConfig,
 ) -> Result<(), String> {
     crate::config::save(&config)?;
     *state.config.write() = config;
+    // 悬浮工具栏要按新配置重排按钮（动作开关），广播一下。
+    let _ = app.emit("config-updated", ());
     Ok(())
 }
 

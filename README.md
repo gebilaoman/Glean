@@ -12,7 +12,7 @@
 | 触发 | `gui/src-tauri/src/selection.rs` | 自建 CGEventTap（只订阅左键按下/松开），把 mousedown/mouseup 合成「拖选」「双击选词」手势 |
 | 取词 | 同上 | `get-selected-text`：macOS AX / Windows UIA，取不到时回落模拟 `Cmd+C` |
 | 悬浮窗 | `gui/src-tauri/src/panel.rs` | `tauri-nspanel` 把窗口换成非激活 `NSPanel`，光标处定位、边缘翻转 |
-| 动作 | `gui/src-tauri/src/actions.rs` | 多模型并发流式调用（OpenAI 兼容），复制与保存走本地 |
+| 动作 | `gui/src-tauri/src/actions.rs` | 多模型并发流式调用（OpenAI 兼容），复制 / 保存 / 朗读走本地 |
 
 前端两个页面共用一份产物，用 hash 区分：`index.html` 是悬浮工具栏，
 `index.html#/settings` 是设置窗。
@@ -72,7 +72,8 @@ cd gui && pnpm tauri:build # 出包
   "drag_threshold": 5.0,
   "settle_ms": 120,
   "double_click_trigger": true,
-  "save_dir": ""
+  "save_dir": "",
+  "actions": ["search", "translate", "explain", "save", "copy", "speak"]
 }
 ```
 
@@ -82,6 +83,8 @@ cd gui && pnpm tauri:build # 出包
     **GLM-5.3 起始终思考**，发关闭会直接 400（code 1210）。
   - `low`/`high`/`max` 发 `thinking:{type:"enabled"}` + `reasoning_effort`。
     GLM-5.3 不传时默认走 `max`，划词这种小任务选 `low` 快很多。
+- `actions`：工具栏上显示哪些动作（顺序固定）。朗读（`speak`）用 macOS 系统的
+  `say`，再点一次即停。
 - `drag_threshold`：位移小于它的鼠标动作当普通点击丢弃。
 - `settle_ms`：松开鼠标到取词之间的等待。太短会读到上一次的选区，觉得取词「慢半拍」就调大它。
 - 保存动作按天追加到 `save_dir/YYYY-MM-DD.md`，留空则用 `~/Documents/Glean`。
@@ -116,7 +119,7 @@ cd gui && pnpm tauri signer generate -w ~/.tauri/glean.key
   Wayland 下全局输入监听受限，暂不支持。
 - 取词对自绘 UI（部分 Electron 应用、游戏）可能失败，这时会回落到模拟复制；
   再失败就静默放弃，不弹窗。
-- 朗读（TTS）尚未实现。
+- 朗读目前只念原文、用系统默认音色（macOS `say`）。
 
 ## 为什么没用 rdev
 

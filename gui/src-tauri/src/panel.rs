@@ -11,8 +11,9 @@ use crate::state::AppState;
 
 pub const SPOTLIGHT: &str = "spotlight";
 
-/// 工具栏逻辑宽度，和前端 CSS 里的 `--panel-width` 必须一致。
-pub const WIDTH: f64 = 560.0;
+/// 工具栏逻辑宽度。六个动作（AI搜索/翻译/解释/保存/复制/朗读）全开时
+/// 560 会溢出，取 600；动作关掉几个时多出的空隙由工具栏自身消化。
+pub const WIDTH: f64 = 600.0;
 /// 只有工具栏时的逻辑高度。
 pub const COLLAPSED_HEIGHT: f64 = 72.0;
 /// 工具栏与光标的垂直间距。

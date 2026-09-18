@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-import { api, events, type ActionKind, type ModelBrief } from '../api';
+import { api, events, type ActionKind, type AppConfig, type ModelBrief } from '../api';
 import {
   Chevron,
   Close,
@@ -21,6 +21,7 @@ import {
   Refresh,
   Save,
   SearchAI,
+  Speaker,
   Spinner,
   Translate,
 } from '../icons';
@@ -32,12 +33,8 @@ interface Result {
   status: Status;
 }
 
-/** 走模型的三个动作；复制/保存是本地操作，不进结果区。 */
-const LLM_ACTIONS: { kind: ActionKind; label: string; Icon: typeof Translate }[] = [
-  { kind: 'search', label: 'AI 搜索', Icon: SearchAI },
-  { kind: 'translate', label: '翻译', Icon: Translate },
-  { kind: 'explain', label: '解释', Icon: Explain },
-];
+/** 配置还没加载到时先按全量渲染，避免闪一下空工具栏。 */
+const DEFAULT_ACTIONS: ActionKind[] = ['search', 'translate', 'explain', 'save', 'copy', 'speak'];
 
 export function Spotlight() {
   const [selection, setSelection] = useState('');
@@ -46,6 +43,9 @@ export function Spotlight() {
   const [results, setResults] = useState<Record<string, Result>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState('');
+  /** 工具栏动作开关（哪些按钮显示） */
+  const [config, setConfig] = useState<AppConfig | null>(null);
+  const [speaking, setSpeaking] = useState(false);
 
   // 每列只认自己当前那一路流：换动作时全部作废，重试时只换被点的那列，
   // 其它列照常收分片。凭动作 id 兜底放行「模型清单还没回来」的窗口期。
@@ -65,6 +65,7 @@ export function Spotlight() {
 
   useEffect(() => {
     api.getSelection().then(setSelection).catch(() => {});
+    api.getConfig().then(setConfig).catch(() => {});
 
     const unlisten = Promise.all([
       events.onSelection((text) => {
@@ -72,6 +73,9 @@ export function Spotlight() {
         setSelection(text);
       }),
       events.onPanelDismiss(reset),
+      events.onConfigUpdated(() => api.getConfig().then(setConfig).catch(() => {})),
+      events.onTtsStarted(() => setSpeaking(true)),
+      events.onTtsStopped(() => setSpeaking(false)),
       events.onLlm((e) => {
         const cur = streamIds.current[e.model_id];
         if (cur !== e.request_id && !(cur === undefined && e.request_id === currentActionId.current))
@@ -151,6 +155,15 @@ export function Spotlight() {
     }
   };
 
+  const onSpeak = async () => {
+    try {
+      // 后端是 toggle：在念就停，没在念就开始；按钮状态由 tts 事件驱动
+      setSpeaking(await api.speakSelection());
+    } catch (e) {
+      flash(String(e));
+    }
+  };
+
   const flash = (msg: string, thenHide = false) => {
     setToast(msg);
     window.setTimeout(() => {
@@ -185,6 +198,22 @@ export function Spotlight() {
       return next;
     });
 
+  /** 工具栏动作表。渲染顺序就是这里的顺序；显示与否由 config.actions 决定。 */
+  const TOOL_ACTIONS: {
+    kind: ActionKind;
+    label: () => string;
+    Icon: typeof Translate;
+    run: () => void;
+    active?: () => boolean;
+  }[] = [
+    { kind: 'search', label: () => 'AI 搜索', Icon: SearchAI, run: () => runLlm('search'), active: () => action === 'search' },
+    { kind: 'translate', label: () => '翻译', Icon: Translate, run: () => runLlm('translate'), active: () => action === 'translate' },
+    { kind: 'explain', label: () => '解释', Icon: Explain, run: () => runLlm('explain'), active: () => action === 'explain' },
+    { kind: 'save', label: () => '保存', Icon: Save, run: onSave },
+    { kind: 'copy', label: () => '复制', Icon: Copy, run: onCopy },
+    { kind: 'speak', label: () => (speaking ? '停止' : '朗读'), Icon: Speaker, run: onSpeak, active: () => speaking },
+  ];
+
   return (
     <div className="spotlight" ref={rootRef}>
       <div className="toolbar">
@@ -205,26 +234,18 @@ export function Spotlight() {
 
         <span className="sep" />
 
-        {LLM_ACTIONS.map(({ kind, label, Icon }) => (
-          <button
-            key={kind}
-            className={`item${action === kind ? ' active' : ''}`}
-            onClick={() => runLlm(kind)}
-          >
-            <Icon />
-            <span>{label}</span>
-          </button>
-        ))}
-
-        <button className="item" onClick={onSave}>
-          <Save />
-          <span>保存</span>
-        </button>
-
-        <button className="item" onClick={onCopy}>
-          <Copy />
-          <span>复制</span>
-        </button>
+        {TOOL_ACTIONS.filter((a) => (config?.actions ?? DEFAULT_ACTIONS).includes(a.kind)).map(
+          (a) => (
+            <button
+              key={a.kind}
+              className={`item${a.active?.() ? ' active' : ''}`}
+              onClick={a.run}
+            >
+              <a.Icon />
+              <span>{a.label()}</span>
+            </button>
+          ),
+        )}
 
         <span className="sep" />
 

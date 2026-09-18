@@ -70,6 +70,8 @@ pub enum ActionKind {
     Search,
     Copy,
     Save,
+    /// 朗读：不走模型，调系统 TTS。
+    Speak,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +92,24 @@ pub struct AppConfig {
     /// 保存动作写入的目录。空则用 `dirs::document_dir()/Glean`。
     #[serde(default)]
     pub save_dir: String,
+    /// 工具栏上显示哪些动作。渲染按固定顺序来，这里只当开关集合用；
+    /// 老配置没有该字段时缺省全开。
+    #[serde(default = "default_actions")]
+    pub actions: Vec<ActionKind>,
+}
+
+/// 工具栏的固定渲染顺序（前端也按这个顺序过滤）。
+pub const CANONICAL_ACTIONS: [ActionKind; 6] = [
+    ActionKind::Search,
+    ActionKind::Translate,
+    ActionKind::Explain,
+    ActionKind::Save,
+    ActionKind::Copy,
+    ActionKind::Speak,
+];
+
+fn default_actions() -> Vec<ActionKind> {
+    CANONICAL_ACTIONS.to_vec()
 }
 
 fn default_target_lang() -> String {
@@ -123,6 +143,7 @@ impl Default for AppConfig {
             settle_ms: default_settle_ms(),
             double_click_trigger: true,
             save_dir: String::new(),
+            actions: default_actions(),
         }
     }
 }
@@ -156,7 +177,9 @@ pub fn system_prompt(action: ActionKind, target_lang: &str) -> String {
             "你是检索型助手。针对用户给出的片段，用{lang}给出与之相关的关键事实、背景和延伸信息。\
              控制在 200 字以内，不确定的地方要明确说不确定。"
         ),
-        // 复制和保存不走模型，兜底给个中性提示词。
-        ActionKind::Copy | ActionKind::Save => format!("用{lang}简要概括用户给出的文本。"),
+        // 复制 / 保存 / 朗读不走模型，这个提示词实际不会被用到，兜底而已。
+        ActionKind::Copy | ActionKind::Save | ActionKind::Speak => {
+            format!("用{lang}简要概括用户给出的文本。")
+        }
     }
 }

@@ -5,7 +5,17 @@
  */
 import { useEffect, useState } from 'react';
 
-import { api, type AppConfig, type ModelConfig, type SystemInfo, type Thinking } from '../api';
+import { api, type ActionKind, type AppConfig, type ModelConfig, type SystemInfo, type Thinking } from '../api';
+
+/** 工具栏动作的固定渲染顺序与文案（与后端 CANONICAL_ACTIONS 对应）。 */
+const TOOLBAR_ACTIONS: { kind: ActionKind; label: string }[] = [
+  { kind: 'search', label: 'AI 搜索' },
+  { kind: 'translate', label: '翻译' },
+  { kind: 'explain', label: '解释' },
+  { kind: 'save', label: '保存' },
+  { kind: 'copy', label: '复制' },
+  { kind: 'speak', label: '朗读' },
+];
 
 /** 思考强度选项。文案里写清各档的代价，免得用户要去翻文档。 */
 const THINKING_OPTIONS: { value: Thinking; label: string }[] = [
@@ -180,6 +190,29 @@ export function Settings() {
             placeholder="留空则用 ~/Documents/Glean"
           />
         </label>
+      </section>
+
+      <section className="card">
+        <h2>工具栏</h2>
+        <p className="hint">勾选的动作才会出现在划词工具栏上，顺序固定。保存后立即生效。</p>
+        <div className="action-toggles">
+          {TOOLBAR_ACTIONS.map(({ kind, label }) => (
+            <label className="check" key={kind}>
+              <input
+                type="checkbox"
+                checked={config.actions.includes(kind)}
+                onChange={(e) =>
+                  patch({
+                    actions: e.target.checked
+                      ? [...config.actions, kind]
+                      : config.actions.filter((k) => k !== kind),
+                  })
+                }
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
       </section>
 
       <section className="card">

@@ -71,6 +71,15 @@ export const Explain = ({ size }: P) => (
 );
 
 /** 保存：一张带横线的纸。 */
+/** 朗读：喇叭。 */
+export const Speaker = ({ size }: P) => (
+  <svg {...base(size)} aria-hidden>
+    <path d="M4 9.6v4.8h3l4 3.4V6.2l-4 3.4H4z" />
+    <path d="M14.4 9.4a3.6 3.6 0 0 1 0 5.2" />
+    <path d="M16.6 7.2a6.6 6.6 0 0 1 0 9.6" />
+  </svg>
+);
+
 /** 重试：环形箭头。 */
 export const Refresh = ({ size = 12 }: P) => (
   <svg {...base(size)} aria-hidden>

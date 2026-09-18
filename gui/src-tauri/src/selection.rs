@@ -219,6 +219,10 @@ fn handle_trigger(app: &AppHandle, trigger: Trigger) {
     }
 
     state.set_selection(text.clone());
+    // 划了新词就别继续念旧的了
+    if state.stop_speech() {
+        let _ = app.emit("tts-stopped", ());
+    }
 
     let _ = app.emit("selection", SelectionPayload { text });
     panel::show_at(app, trigger.x, trigger.y);

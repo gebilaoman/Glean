@@ -2,7 +2,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-export type ActionKind = 'translate' | 'explain' | 'search' | 'copy' | 'save';
+export type ActionKind = 'translate' | 'explain' | 'search' | 'copy' | 'save' | 'speak';
 
 /** 思考强度。auto = 不发任何思考参数（兼容性最好）。 */
 export type Thinking = 'auto' | 'off' | 'low' | 'high' | 'max';
@@ -25,6 +25,8 @@ export interface AppConfig {
   settle_ms: number;
   double_click_trigger: boolean;
   save_dir: string;
+  /** 工具栏上显示哪些动作（开关集合，渲染顺序固定）。 */
+  actions: ActionKind[];
 }
 
 export interface ModelBrief {
@@ -57,6 +59,8 @@ export const api = {
   getSelection: () => invoke<string>('get_selection'),
   copySelection: () => invoke<void>('copy_selection'),
   saveSelection: () => invoke<string>('save_selection'),
+  /** 朗读划词文本；再点一次停止。返回是否开始朗读。 */
+  speakSelection: () => invoke<boolean>('speak_selection'),
   hidePanel: () => invoke<void>('hide_panel'),
   setPanelHeight: (height: number) => invoke<void>('set_panel_height', { height }),
   openSettings: () => invoke<void>('open_settings'),
@@ -80,4 +84,10 @@ export const events = {
     listen('panel-dismiss', () => cb()),
   onHookError: (cb: (msg: string) => void): Promise<UnlistenFn> =>
     listen<string>('hook-error', (e) => cb(e.payload)),
+  onTtsStarted: (cb: () => void): Promise<UnlistenFn> =>
+    listen('tts-started', () => cb()),
+  onTtsStopped: (cb: () => void): Promise<UnlistenFn> =>
+    listen('tts-stopped', () => cb()),
+  onConfigUpdated: (cb: () => void): Promise<UnlistenFn> =>
+    listen('config-updated', () => cb()),
 };
