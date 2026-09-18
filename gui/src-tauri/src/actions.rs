@@ -219,8 +219,10 @@ pub fn list_voices() -> Result<Vec<VoiceInfo>, String> {
     }
 }
 
-/// `say` 的公共管道：停掉在念的、按参数起新的、派看护线程收尾。
-/// 工具栏的「朗读」和设置页的「试听」都走这里。
+/// `say` 的「永远新起」管道：停掉在念的、按参数起新的、派看护线程收尾。
+/// 只有设置页「试听」直接走这里（试听永远是重新放一遍）。
+/// 工具栏「朗读」的 toggle 语义（点第二次是停、**不重放**）在 speak_selection 里，
+/// 别把这层挪进 spawn_say——上次重构就是把它俩混了，停止变成从头重念。
 ///
 /// macOS 直接调系统的 `say`（AVSpeechSynthesizer 的命令行前端），零依赖；
 /// 「停」就是杀子进程。看护线程每 200ms `try_wait` 一次，念完自然收尾并通知前端。
@@ -289,6 +291,11 @@ fn spawn_say(
 /// 朗读划词文本；再点一次停止（toggle）。正在朗读时按钮亮着。
 #[tauri::command]
 pub fn speak_selection(app: AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
+    // 已经在念 → 这次点的是「停」，直接返回，绝不再起新的
+    if state.stop_speech() {
+        let _ = app.emit("tts-stopped", ());
+        return Ok(false);
+    }
     let text = state.selection();
     let (voice, rate) = {
         let cfg = state.config.read();
