@@ -93,15 +93,8 @@ cd gui && pnpm install && pnpm tauri:dev   # 开发
 cd gui && pnpm tauri:build                 # 出包
 ```
 
-> 仓库根的 `rust-toolchain.toml` 把工具链钉在原生 `aarch64`。依赖链里的 bindgen
-> 需要与 Xcode 同架构的 libclang，Rosetta 下的 x86_64 工具链会在
-> `appkit-nsworkspace-bindings` 上直接编译失败。
-
-**为什么触发层不用 `rdev`**：它把键盘事件也一并订阅，而其内部调用的
-`TSMGetInputSourceProperty` 断言必须在主队列上跑——工具开着时敲一下键盘就会
-SIGTRAP 崩溃；且 macOS 下它不转发拖拽坐标，拖选位移恒为 0、划词不会触发。
-所以自己建了只订阅鼠标按下/松开的 ListenOnly tap（`selection.rs`），顺带处理了
-系统停用 tap 后的自动重启。
+> 构建 Rust 侧需要原生 `aarch64` 工具链（仓库已用 `rust-toolchain.toml` 钉好，
+> 无需额外操作）。
 
 ### 发版
 
