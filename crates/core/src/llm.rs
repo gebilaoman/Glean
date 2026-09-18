@@ -22,11 +22,14 @@ pub enum StreamEvent {
 }
 
 /// 拼请求体。抽出来单独放是为了能单测——思考参数各家写法不一，很容易写错。
-fn build_body(model: &ModelConfig, system: &str, user: &str) -> serde_json::Value {
+///
+/// `retry` 时把温度从 0.2 抬到 0.7：重试的意义就是「这次翻得不准、换一个译法」，
+/// 温度不变的话大概率抽到几乎一样的结果，重试等于没试。
+fn build_body(model: &ModelConfig, system: &str, user: &str, retry: bool) -> serde_json::Value {
     let mut body = serde_json::json!({
         "model": model.model,
         "stream": true,
-        "temperature": 0.2,
+        "temperature": if retry { 0.7 } else { 0.2 },
         "messages": [
             { "role": "system", "content": system },
             { "role": "user", "content": user },
@@ -61,6 +64,7 @@ pub async fn stream_chat<F>(
     model: &ModelConfig,
     system: &str,
     user: &str,
+    retry: bool,
     mut on_event: F,
 ) where
     F: FnMut(StreamEvent) + Send,
@@ -69,7 +73,7 @@ pub async fn stream_chat<F>(
         "{}/chat/completions",
         model.endpoint.trim_end_matches('/')
     );
-    let body = build_body(model, system, user);
+    let body = build_body(model, system, user, retry);
 
     let mut req = client.post(&url).json(&body);
     if !model.api_key.trim().is_empty() {
@@ -168,14 +172,14 @@ mod tests {
 
     #[test]
     fn auto_sends_no_thinking_params() {
-        let b = build_body(&model(Thinking::Auto), "s", "u");
+        let b = build_body(&model(Thinking::Auto), "s", "u", false);
         assert!(b.get("thinking").is_none());
         assert!(b.get("reasoning_effort").is_none());
     }
 
     #[test]
     fn off_sends_disabled() {
-        let b = build_body(&model(Thinking::Off), "s", "u");
+        let b = build_body(&model(Thinking::Off), "s", "u", false);
         assert_eq!(b["thinking"]["type"], "disabled");
         // 关思考时不该再带强度
         assert!(b.get("reasoning_effort").is_none());
@@ -183,14 +187,20 @@ mod tests {
 
     #[test]
     fn level_sends_enabled_plus_effort() {
-        let b = build_body(&model(Thinking::Low), "s", "u");
+        let b = build_body(&model(Thinking::Low), "s", "u", false);
         assert_eq!(b["thinking"]["type"], "enabled");
         assert_eq!(b["reasoning_effort"], "low");
     }
 
     #[test]
+    fn retry_raises_temperature_for_another_sample() {
+        let b = build_body(&model(Thinking::Auto), "s", "u", true);
+        assert_eq!(b["temperature"], 0.7);
+    }
+
+    #[test]
     fn always_streams() {
-        let b = build_body(&model(Thinking::Max), "s", "u");
+        let b = build_body(&model(Thinking::Max), "s", "u", false);
         assert_eq!(b["stream"], true);
         assert_eq!(b["model"], "glm-5.3");
         assert_eq!(b["messages"][0]["content"], "s");

@@ -18,6 +18,7 @@ import {
   DragHandle,
   Explain,
   Logo,
+  Refresh,
   Save,
   SearchAI,
   Spinner,
@@ -46,12 +47,15 @@ export function Spotlight() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState('');
 
-  // 作废过期请求：只认最后一次发出的 request_id，防止上一轮的分片串进来。
-  const requestId = useRef('');
+  // 每列只认自己当前那一路流：换动作时全部作废，重试时只换被点的那列，
+  // 其它列照常收分片。凭动作 id 兜底放行「模型清单还没回来」的窗口期。
+  const currentActionId = useRef('');
+  const streamIds = useRef<Record<string, string>>({});
   const rootRef = useRef<HTMLDivElement>(null);
 
   const reset = useCallback(() => {
-    requestId.current = '';
+    currentActionId.current = '';
+    streamIds.current = {};
     setAction(null);
     setModels([]);
     setResults({});
@@ -69,7 +73,9 @@ export function Spotlight() {
       }),
       events.onPanelDismiss(reset),
       events.onLlm((e) => {
-        if (e.request_id !== requestId.current) return;
+        const cur = streamIds.current[e.model_id];
+        if (cur !== e.request_id && !(cur === undefined && e.request_id === currentActionId.current))
+          return;
         setResults((prev) => {
           const cur = prev[e.model_id] ?? { text: '', status: 'streaming' as Status };
           if (e.kind === 'delta') {
@@ -109,21 +115,39 @@ export function Spotlight() {
 
   const runLlm = async (kind: ActionKind) => {
     const id = crypto.randomUUID();
-    requestId.current = id;
+    currentActionId.current = id;
+    streamIds.current = {};
     setAction(kind);
     setResults({});
     try {
       const briefs = await api.runAction(kind, id);
-      if (requestId.current !== id) return;
+      if (currentActionId.current !== id) return;
       setModels(briefs);
+      // 模型清单回来了，给每列登记本轮流 id；在那之前 onLlm 凭动作 id 放行。
+      streamIds.current = Object.fromEntries(briefs.map((m) => [m.id, id]));
       // 主模型默认展开；没有标主模型时展开第一个。
       const first = briefs.find((m) => m.primary) ?? briefs[0];
       setExpanded(new Set(first ? [first.id] : []));
     } catch (e) {
-      if (requestId.current !== id) return;
+      if (currentActionId.current !== id) return;
       setModels([{ id: '__error__', name: '出错了', primary: true }]);
       setResults({ __error__: { text: String(e), status: 'error' } });
       setExpanded(new Set(['__error__']));
+    }
+  };
+
+  /** 单列重试：清掉该列结果重新流式；旧流的分片会被 streamIds 挡在外面。 */
+  const retryModel = async (modelId: string) => {
+    if (!action) return;
+    const id = crypto.randomUUID();
+    streamIds.current[modelId] = id;
+    setResults((prev) => ({ ...prev, [modelId]: { text: '', status: 'streaming' } }));
+    setExpanded((prev) => new Set(prev).add(modelId));
+    try {
+      await api.retryModel(action, modelId, id);
+    } catch (e) {
+      if (streamIds.current[modelId] !== id) return;
+      setResults((prev) => ({ ...prev, [modelId]: { text: String(e), status: 'error' } }));
     }
   };
 
@@ -226,7 +250,8 @@ export function Spotlight() {
             const open = expanded.has(m.id);
             return (
               <section key={m.id} className={`model${open ? ' open' : ''}`}>
-                <button className="model-head" onClick={() => toggle(m.id)}>
+                {/* div 而不是 button：里面还要嵌重试按钮，button 不允许嵌套 */}
+                <div className="model-head" onClick={() => toggle(m.id)}>
                   <span className="chevron">
                     <Chevron open={open} />
                   </span>
@@ -234,7 +259,24 @@ export function Spotlight() {
                   {m.primary && <span className="badge">主</span>}
                   {r?.status === 'streaming' && <Spinner size={12} />}
                   {r?.status === 'error' && <span className="badge err">失败</span>}
-                </button>
+                  {m.id !== '__error__' && (
+                    <button
+                      className="retry"
+                      title={
+                        action === 'translate'
+                          ? '重新翻译：换个译法再抽一次'
+                          : '重新生成'
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        retryModel(m.id);
+                      }}
+                    >
+                      <Refresh />
+                      {action === 'translate' ? '重译' : '重试'}
+                    </button>
+                  )}
+                </div>
                 {open && (
                   <div className={`model-body${r?.status === 'error' ? ' err' : ''}`}>
                     {r?.text || (r?.status === 'error' ? '' : '…')}

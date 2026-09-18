@@ -65,6 +65,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             actions::run_action,
+            actions::retry_model,
             actions::get_selection,
             actions::copy_selection,
             actions::save_selection,

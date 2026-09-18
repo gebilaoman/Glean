@@ -71,6 +71,14 @@ export const Explain = ({ size }: P) => (
 );
 
 /** 保存：一张带横线的纸。 */
+/** 重试：环形箭头。 */
+export const Refresh = ({ size = 12 }: P) => (
+  <svg {...base(size)} aria-hidden>
+    <path d="M19.4 12a7.4 7.4 0 1 1-2.17-5.2" />
+    <path d="M19.4 3.6v3.6h-3.6" />
+  </svg>
+);
+
 export const Save = ({ size }: P) => (
   <svg {...base(size)} aria-hidden>
     <rect x="4.5" y="4.5" width="15" height="15" rx="2.5" />

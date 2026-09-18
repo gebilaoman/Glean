@@ -67,38 +67,77 @@ pub async fn run_action(
 
     let briefs: Vec<ModelBrief> = models.iter().map(ModelBrief::from).collect();
     let system = system_prompt(action, &target_lang);
-    let client = state.http.clone();
 
     for model in models {
-        let app = app.clone();
-        let client = client.clone();
-        let system = system.clone();
-        let text = text.clone();
-        let request_id = request_id.clone();
         // 每个模型一个独立任务：一路超时或报错不拖累其它列。
-        tauri::async_runtime::spawn(async move {
-            let model_id = model.id.clone();
-            stream_chat(&client, &model, &system, &text, |ev| {
-                let (kind, data) = match ev {
-                    StreamEvent::Delta(d) => ("delta", d),
-                    StreamEvent::Done => ("done", String::new()),
-                    StreamEvent::Error(e) => ("error", e),
-                };
-                let _ = app.emit(
-                    "llm",
-                    LlmEvent {
-                        request_id: request_id.clone(),
-                        model_id: model_id.clone(),
-                        kind,
-                        data,
-                    },
-                );
-            })
-            .await;
-        });
+        spawn_model_stream(&app, &state.http, model, system.clone(), text.clone(), request_id.clone(), false);
     }
 
     Ok(briefs)
+}
+
+/// 把一个模型的流式任务丢到后台，分片走 `llm` 事件推送。
+/// `run_action` 对全部启用的模型各来一次（retry = false），
+/// `retry_model` 对单个模型来一次（retry = true，温度抬高重新抽）。
+fn spawn_model_stream(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    model: glean_core::ModelConfig,
+    system: String,
+    text: String,
+    request_id: String,
+    retry: bool,
+) {
+    let app = app.clone();
+    let client = client.clone();
+    tauri::async_runtime::spawn(async move {
+        let model_id = model.id.clone();
+        stream_chat(&client, &model, &system, &text, retry, |ev| {
+            let (kind, data) = match ev {
+                StreamEvent::Delta(d) => ("delta", d),
+                StreamEvent::Done => ("done", String::new()),
+                StreamEvent::Error(e) => ("error", e),
+            };
+            let _ = app.emit(
+                "llm",
+                LlmEvent {
+                    request_id: request_id.clone(),
+                    model_id: model_id.clone(),
+                    kind,
+                    data,
+                },
+            );
+        })
+        .await;
+    });
+}
+
+/// 单个模型重试。只重发被点的那一列，其它列的结果不动。
+#[tauri::command]
+pub async fn retry_model(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    action: ActionKind,
+    model_id: String,
+    request_id: String,
+) -> Result<(), String> {
+    let text = state.selection();
+    if text.is_empty() {
+        return Err("没有可用的划词文本".into());
+    }
+    let (model, target_lang) = {
+        let cfg = state.config.read();
+        let model = cfg
+            .models
+            .iter()
+            .find(|m| m.id == model_id)
+            .cloned()
+            .ok_or_else(|| format!("配置里没有模型 {model_id}"))?;
+        (model, cfg.target_lang.clone())
+    };
+    let system = system_prompt(action, &target_lang);
+    spawn_model_stream(&app, &state.http, model, system, text, request_id, true);
+    Ok(())
 }
 
 /// 当前缓存的划词文本（前端刷新/重挂载时用）。

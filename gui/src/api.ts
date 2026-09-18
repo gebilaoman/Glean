@@ -51,6 +51,9 @@ export interface SystemInfo {
 export const api = {
   runAction: (action: ActionKind, requestId: string) =>
     invoke<ModelBrief[]>('run_action', { action, requestId }),
+  /** 单个模型重试：只重发那一列，其它列的结果不动。 */
+  retryModel: (action: ActionKind, modelId: string, requestId: string) =>
+    invoke<void>('retry_model', { action, modelId, requestId }),
   getSelection: () => invoke<string>('get_selection'),
   copySelection: () => invoke<void>('copy_selection'),
   saveSelection: () => invoke<string>('save_selection'),
