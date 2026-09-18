@@ -14,6 +14,7 @@
 //!   （回调跑在 tap 的 run loop 上，在里面做取词这种耗时活会被系统判超时、直接停掉 tap。）
 //! - worker 线程收触发点，等选区稳定后取词、定位、弹窗。
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Sender, channel};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -21,8 +22,12 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::actions;
 use crate::panel;
 use crate::state::AppState;
+
+/// 事件 tap 是否在运行。监护线程据此决定要不要把它拉起来。
+static HOOK_UP: AtomicBool = AtomicBool::new(false);
 
 /// 双击判定的时间窗。
 const DOUBLE_CLICK_MS: u128 = 400;
@@ -53,7 +58,11 @@ struct Gesture {
     last_click: Option<(f64, f64, Instant)>,
 }
 
-/// 启动 tap 线程与 worker 线程。调用一次。
+/// 启动 worker 线程与 tap 监护。调用一次。
+///
+/// 权限经常是「后到」的：用户装完应用才去系统设置里授权，而 tap 只能在有权限时
+/// 创建。之前只在启动时建一次，授权晚了就得重启应用；现在监护线程每 2 秒看一眼，
+/// 权限一到位（或中途被收回又恢复）就自动把 tap 拉起来。
 pub fn spawn(app: AppHandle) {
     let (tx, rx) = channel::<Trigger>();
 
@@ -66,13 +75,36 @@ pub fn spawn(app: AppHandle) {
         });
     }
 
-    thread::spawn(move || {
-        if let Err(e) = run_hook(app.clone(), tx) {
-            eprintln!("[glean] 全局鼠标监听启动失败：{e}");
-            // 绝大多数情况是 macOS 没给辅助功能权限，让设置页能提示用户。
-            let _ = app.emit("hook-error", e);
-        }
-    });
+    #[cfg(target_os = "macos")]
+    {
+        let tx = tx;
+        thread::spawn(move || loop {
+            if !HOOK_UP.load(Ordering::SeqCst) && actions::accessibility_trusted() {
+                HOOK_UP.store(true, Ordering::SeqCst);
+                let (app, tx) = (app.clone(), tx.clone());
+                thread::spawn(move || {
+                    if let Err(e) = run_hook(app.clone(), tx) {
+                        // 权限被收回或系统拒绝：放回"未运行"，监护线程稍后重试
+                        HOOK_UP.store(false, Ordering::SeqCst);
+                        eprintln!("[glean] 全局鼠标监听启动失败：{e}");
+                        let _ = app.emit("hook-error", e);
+                    }
+                });
+            }
+            thread::sleep(Duration::from_secs(2));
+        });
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let tx = tx;
+        thread::spawn(move || {
+            if let Err(e) = run_hook(app.clone(), tx) {
+                eprintln!("[glean] 全局鼠标监听启动失败：{e}");
+                let _ = app.emit("hook-error", e);
+            }
+        });
+    }
 }
 
 /// 按下：记起点；如果面板开着而且没点在面板上，就先收起它。
