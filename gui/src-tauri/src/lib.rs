@@ -72,6 +72,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             actions::run_action,
             actions::retry_model,
+            actions::fetch_models,
             actions::speak_selection,
             actions::list_voices,
             actions::preview_voice,

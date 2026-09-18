@@ -153,6 +153,45 @@ pub async fn retry_model(
     Ok(())
 }
 
+/// 从 OpenAI 兼容端点拉模型清单（GET /models）。
+/// 设置页的模型下拉用；拉不到（厂商没实现/网络/没填 key）前端回落预设清单。
+#[tauri::command]
+pub async fn fetch_models(
+    state: State<'_, AppState>,
+    endpoint: String,
+    api_key: String,
+) -> Result<Vec<String>, String> {
+    let url = format!("{}/models", endpoint.trim_end_matches('/'));
+    let mut req = state.http.get(&url);
+    if !api_key.trim().is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", api_key.trim()));
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("请求失败：{e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let detail = resp.text().await.unwrap_or_default();
+        let detail: String = detail.chars().take(200).collect();
+        return Err(format!("{status}：{detail}"));
+    }
+    let v: serde_json::Value = resp.json().await.map_err(|e| format!("解析失败：{e}"))?;
+    let mut ids: Vec<String> = v["data"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m["id"].as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    ids.sort();
+    if ids.is_empty() {
+        return Err("返回里没有模型".into());
+    }
+    Ok(ids)
+}
+
 /// 当前缓存的划词文本（前端刷新/重挂载时用）。
 #[tauri::command]
 pub fn get_selection(state: State<'_, AppState>) -> String {

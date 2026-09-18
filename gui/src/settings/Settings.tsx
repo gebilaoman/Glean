@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 
 import { api, type ActionKind, type AppConfig, type ModelConfig, type SystemInfo, type Thinking, type VoiceInfo } from '../api';
 import { Chevron } from '../icons';
+import { PROVIDERS, inferProvider, type ProviderPreset } from '../providers';
 
 /** 工具栏动作的固定渲染顺序与文案（与后端 CANONICAL_ACTIONS 对应）。 */
 /** say 的默认语速（约 175 字/分）。滑杆 0 居中 = 跟随默认。 */
@@ -62,6 +63,8 @@ export function Settings() {
   const [candidates, setCandidates] = useState<ModelConfig[] | null>(null);
   /** 系统已装的音色，中文的排前面 */
   const [voices, setVoices] = useState<VoiceInfo[]>([]);
+  /** 每个模型卡的模型候选（实时拉取结果），键是模型 id */
+  const [modelOptions, setModelOptions] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     api.getConfig().then(setConfig).catch((e) => setStatus(String(e)));
@@ -94,6 +97,32 @@ export function Settings() {
   const patchModel = (idx: number, p: Partial<ModelConfig>) => {
     const models = config.models.map((m, i) => (i === idx ? { ...m, ...p } : m));
     patch({ models });
+  };
+
+  /** 从服务拉真实模型清单，填进对应模型卡的候选。拉不到就静默保持预设。 */
+  const refreshModels = async (endpoint: string, apiKey: string, modelId: string) => {
+    if (!endpoint.trim()) return;
+    try {
+      const list = await api.fetchModels(endpoint, apiKey);
+      setModelOptions((prev) => ({ ...prev, [modelId]: list }));
+    } catch {
+      // 留着预设清单
+    }
+  };
+
+  /** 选定提供商：端点 / 默认模型 / 思考建议一次填好；有 Key（或本地服务）就直接拉真实清单。 */
+  const applyProvider = (idx: number, preset: ProviderPreset) => {
+    const m = config.models[idx];
+    const p: Partial<ModelConfig> = {
+      endpoint: preset.endpoint,
+      model: preset.models[0] ?? '',
+    };
+    if (preset.thinking) p.thinking = preset.thinking;
+    patchModel(idx, p);
+    setModelOptions((prev) => ({ ...prev, [m.id]: preset.models }));
+    if (m.api_key.trim() || !preset.needsKey) {
+      refreshModels(preset.endpoint, m.api_key, m.id);
+    }
   };
 
   /** 上/下移模型：顺序即优先级，第一个启用的模型默认展开。 */
@@ -257,7 +286,7 @@ export function Settings() {
           </div>
         </div>
         <p className="hint">
-          兼容所有 OpenAI 协议的服务。端点填到 <code>/v1</code> 为止，本地服务通常不需要 API Key。
+          选提供商 → 贴 API Key → 下拉选模型即可；「自定义」才需要手填端点。
           启用多个即可并排对比；列表顺序就是结果区顺序，第一个启用的默认展开，用卡片上的
           ↑↓ 调整。
           <br />
@@ -328,22 +357,46 @@ export function Settings() {
               </button>
             </div>
             <div className="model-grid">
-              <input
-                value={m.endpoint}
-                onChange={(e) => patchModel(i, { endpoint: e.target.value })}
-                placeholder="http://localhost:11434/v1"
-              />
-              <input
-                value={m.model}
-                onChange={(e) => patchModel(i, { model: e.target.value })}
-                placeholder="模型名，如 qwen3:8b"
-              />
+              <select
+                value={inferProvider(m.endpoint).id}
+                onChange={(e) => {
+                  const preset = PROVIDERS.find((p) => p.id === e.target.value);
+                  if (preset) applyProvider(i, preset);
+                }}
+              >
+                {PROVIDERS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
               <input
                 type="password"
                 value={m.api_key}
                 onChange={(e) => patchModel(i, { api_key: e.target.value })}
-                placeholder="API Key（本地服务可留空）"
+                placeholder={
+                  inferProvider(m.endpoint).needsKey ? 'API Key' : 'API Key（本地可留空）'
+                }
               />
+              <div className="model-pick">
+                <input
+                  list={`model-opts-${m.id}`}
+                  value={m.model}
+                  onChange={(e) => patchModel(i, { model: e.target.value })}
+                  placeholder="模型名（下拉选择或手填）"
+                />
+                <datalist id={`model-opts-${m.id}`}>
+                  {(modelOptions[m.id] ?? inferProvider(m.endpoint).models).map((name) => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
+                <button
+                  title="从服务拉取模型列表"
+                  onClick={() => refreshModels(m.endpoint, m.api_key, m.id)}
+                >
+                  刷新
+                </button>
+              </div>
               <select
                 value={m.thinking ?? 'auto'}
                 onChange={(e) => patchModel(i, { thinking: e.target.value as Thinking })}
@@ -355,6 +408,14 @@ export function Settings() {
                 ))}
               </select>
             </div>
+            {inferProvider(m.endpoint).id === 'custom' && (
+              <input
+                className="endpoint"
+                value={m.endpoint}
+                onChange={(e) => patchModel(i, { endpoint: e.target.value })}
+                placeholder="端点，填到 /v1 为止，如 http://localhost:8080/v1"
+              />
+            )}
           </div>
         ))}
       </section>

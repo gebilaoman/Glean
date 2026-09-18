@@ -71,6 +71,9 @@ export const api = {
   getSelection: () => invoke<string>('get_selection'),
   /** 朗读划词文本；再点一次停止。返回是否开始朗读。 */
   speakSelection: () => invoke<boolean>('speak_selection'),
+  /** 从端点拉模型清单（GET /models），失败时前端回落预设。 */
+  fetchModels: (endpoint: string, apiKey: string) =>
+    invoke<string[]>('fetch_models', { endpoint, apiKey }),
   /** 系统已装的音色列表，设置页候选用。 */
   listVoices: () => invoke<VoiceInfo[]>('list_voices'),
   /** 用表单里未保存的音色/语速念一句样例。 */
