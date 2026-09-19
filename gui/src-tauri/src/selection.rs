@@ -259,7 +259,8 @@ fn handle_trigger(app: &AppHandle, trigger: Trigger) {
     thread::sleep(Duration::from_millis(settle));
 
     let started = std::time::Instant::now();
-    let text = match get_selected_text::get_selected_text() {
+    let frontmost = crate::fetch::frontmost_app();
+    let text = match crate::fetch::fetch_selected_text() {
         Ok(t) => t,
         Err(e) => {
             // 取不到很常见（自绘 UI、没选中、权限不足），不打扰用户，只记日志。
@@ -269,9 +270,10 @@ fn handle_trigger(app: &AppHandle, trigger: Trigger) {
     };
     let text = text.trim().to_string();
     diag::log(format!(
-        "触发({:.0},{:.0}) 取词耗时 {:?}，{} 字符",
+        "触发({:.0},{:.0}) [{}] 取词耗时 {:?}，{} 字符",
         trigger.x,
         trigger.y,
+        if frontmost.is_empty() { "?" } else { &frontmost },
         started.elapsed(),
         text.chars().count()
     ));

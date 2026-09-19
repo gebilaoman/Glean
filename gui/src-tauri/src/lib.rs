@@ -10,6 +10,7 @@ mod actions;
 mod ccswitch;
 mod config;
 mod diag;
+mod fetch;
 mod panel;
 mod selection;
 mod state;
