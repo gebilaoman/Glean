@@ -1,24 +1,28 @@
 //! 触发层 + 取词层。
 //!
-//! 系统里没有「划词事件」，得自己合成：鼠标按下记起点，松开时比位移，超阈值判为拖选；
+//! 系统里没有「划词事件」，得自己合成：按下记起点，松开时比位移，超阈值判为拖选；
 //! 另外识别双击选词。判定成立才去取词。
 //!
-//! **为什么不用 rdev**：rdev 0.5.3 的事件掩码写死了，把键盘事件也一并订阅，
-//! 而它的 `convert()` 会调 HIToolbox 的 `TSMGetInputSourceProperty` 去查键盘布局——
-//! 那个 API 断言必须跑在主队列上，而事件 tap 在自己的线程上，于是**只要在划词工具
-//! 开着的时候敲一下键盘，进程就 SIGTRAP 崩溃**。掩码不可配，只能自己建 tap：
-//! 这里直接用 CoreGraphics 开一个只收左键按下/松开的 ListenOnly tap。
+//! **为什么是轮询，而不是事件回调**——前两版踩遍了 macOS 事件机制：
+//! 1. `rdev`（CGEventTap 封装）：事件掩码写死连键盘一起订阅，其内部调用的
+//!    HIToolbox API 断言必须在主队列上跑，工具开着时敲一下键盘就 SIGTRAP；
+//!    且 macOS 下它不转发拖拽坐标，拖选位移恒为 0。
+//! 2. 自建 CGEventTap（只订阅鼠标）：macOS 会以「回调超时」为由频繁停用 tap
+//!    （实测 9 分钟 13 次，回调已归零也照停），停用窗口内的鼠标事件全部丢失，
+//!    划词时灵时不灵。
+//! 3. `NSEvent` 全局监听：实测这台系统上只送 mouse-down、不送 mouse-up，
+//!    拖选永远配不上对。
 //!
-//! 线程结构——**tap 回调必须保持零工作量**。回调跑在系统的 run loop 上，稍慢就会被
-//! 以超时为由停用 tap，停用窗口内的鼠标事件全部丢失，并且手势状态会留下过期的按下，
-//! 与后续无关的松开配成「幽灵拖选」（曾导致划词时灵时不灵、日志里出现位移上千像素
-//! 的假触发）：
-//! - tap 线程：回调只把 (事件类型, 坐标) 塞进 channel 立即返回；
-//! - 手势 worker：消费原始事件，配对、判定、收起面板等全部逻辑都在这条线程；
-//! - 取词 worker：消费判定出的触发点，带 3s 超时地取词、弹窗；
-//! - 监护线程：权限就绪时拉起 tap，权限被收回则自动重启。
+//! 轮询（`CGEventSourceButtonState` + 光标位置）是无状态查询：系统没有机制
+//! 停用它，也不存在「丢事件」——按键状态翻转必然被某次采样看到。25ms 的
+//! 采样间隔就是检测延迟上限，人手操作完全无感。副作用：轮询能看到自己面板上
+//! 的点击，所以按下时要做面板内命中测试（事件回调时代的 press_inside_panel 回来了）。
+//!
+//! ⚠️ 测试注意：`CGEventSourceButtonState` **不反映合成事件**（cliclick /
+//! CGEventPost 注入的点击看不见），但它对真实硬件鼠标完全可靠（用户实测）。
+//! 自动化测试只能覆盖「事件转发 → AX 取词 → 面板弹出」的后半段，手势判定
+//! 这一段必须用真实鼠标验证。
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Sender, channel};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -26,33 +30,23 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::actions;
 use crate::diag;
 use crate::panel;
 use crate::state::AppState;
 
-/// 事件 tap 是否在运行。监护线程据此决定要不要把它拉起来。
-static HOOK_UP: AtomicBool = AtomicBool::new(false);
-
+/// 鼠标采样间隔，也是手势检测延迟的上限。
+const POLL_MS: u64 = 25;
 /// 双击判定的时间窗。
 const DOUBLE_CLICK_MS: u128 = 400;
 /// 双击两次落点允许的最大偏移（逻辑像素）。
 const DOUBLE_CLICK_SLOP: f64 = 6.0;
-/// 按下超过这么久的配对作废：中间大概率发生过事件丢失（tap 被系统暂停等），
-/// 此时的位移没有意义，不能当成拖选。
-const STALE_PRESS: Duration = Duration::from_secs(2);
+/// 按下超过这么久的配对作废（休眠恢复等场景下时钟跳跃的保险丝）。
+const STALE_PRESS: Duration = Duration::from_secs(60);
 
 /// 推给前端的划词结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct SelectionPayload {
     pub text: String,
-}
-
-/// tap 回调转发的最小事件。
-#[derive(Debug)]
-enum RawEvent {
-    Down { x: f64, y: f64 },
-    Up { x: f64, y: f64 },
 }
 
 /// 手势 worker 丢给取词 worker 的触发点（全局逻辑坐标）。
@@ -72,25 +66,38 @@ struct Gesture {
     last_click: Option<(f64, f64, Instant)>,
 }
 
-/// 启动各 worker 与 tap 监护。调用一次。
-///
-/// 权限经常是「后到」的：用户装完应用才去系统设置里授权，而 tap 只能在有权限时
-/// 创建。监护线程每 2 秒看一眼，权限一到位（或中途被收回又恢复）就自动拉起 tap，
-/// 无需重启应用。
+/// 启动手势 worker 与取词 worker。调用一次。
 pub fn spawn(app: AppHandle) {
-    let (raw_tx, raw_rx) = channel::<RawEvent>();
     let (trig_tx, trig_rx) = channel::<Trigger>();
 
-    // 手势 worker：事件配对与判定
+    // 手势 worker：轮询鼠标状态，配对按下/松开。
+    //
+    // 权限未就绪时也照常轮询——手势判定本身不需要辅助功能权限，只是取词会
+    // 失败；权限一到位取词立刻就能工作，无需重启。
     {
         let app = app.clone();
         thread::spawn(move || {
             let mut g = Gesture::default();
-            for ev in raw_rx {
-                match ev {
-                    RawEvent::Down { x, y } => on_press(&app, &mut g, x, y),
-                    RawEvent::Up { x, y } => on_release(&app, &mut g, &trig_tx, x, y),
+            let mut was_down = false;
+            // 事件源只建一次：CGEventSource::new 每次都要连 WindowServer，
+            // 放进循环里会把采样周期拖长到几百毫秒（实测教训）。
+            let source = mouse_source();
+            loop {
+                let iter_start = Instant::now();
+                thread::sleep(Duration::from_millis(POLL_MS));
+                let down = mouse_left_down();
+                let Some((x, y)) = cursor_position(&source) else { continue };
+                let cost = iter_start.elapsed();
+                if cost > Duration::from_millis(100) {
+                    diag::log(format!("采样周期异常：{cost:?}"));
                 }
+                // 探针：每秒打一次按钮状态与光标
+                match (was_down, down) {
+                    (false, true) => on_press(&app, &mut g, x, y),
+                    (true, false) => on_release(&app, &mut g, &trig_tx, x, y),
+                    _ => continue,
+                }
+                was_down = down;
             }
         });
     }
@@ -113,42 +120,35 @@ pub fn spawn(app: AppHandle) {
             }
         });
     }
+}
 
-    #[cfg(target_os = "macos")]
-    {
-        let tx = raw_tx;
-        thread::spawn(move || loop {
-            let trusted = actions::accessibility_trusted();
-            if !HOOK_UP.load(Ordering::SeqCst) && trusted {
-                diag::log("权限就绪，拉起鼠标监听");
-                HOOK_UP.store(true, Ordering::SeqCst);
-                let thread_app = app.clone();
-                let tx = tx.clone();
-                let emit_app = app.clone();
-                thread::spawn(move || match run_hook(thread_app, tx) {
-                    Ok(()) => diag::log("run_hook 线程退出（run loop 结束）"),
-                    Err(e) => {
-                        // 权限被收回或系统拒绝：放回"未运行"，监护线程稍后重试
-                        HOOK_UP.store(false, Ordering::SeqCst);
-                        diag::log(format!("全局鼠标监听启动失败：{e}"));
-                        let _ = emit_app.emit("hook-error", e);
-                    }
-                });
-            }
-            thread::sleep(Duration::from_secs(2));
-        });
-    }
+fn mouse_source() -> core_graphics::event_source::CGEventSource {
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
+        .expect("创建 CGEventSource 失败")
+}
 
-    #[cfg(not(target_os = "macos"))]
-    {
-        let tx = raw_tx;
-        thread::spawn(move || {
-            if let Err(e) = run_hook(app, tx) {
-                diag::log(format!("全局鼠标监听启动失败：{e}"));
-                let _ = app.emit("hook-error", e);
-            }
-        });
-    }
+/// 左键当前是否按下（CombinedSession 状态，含合成事件）。
+#[cfg(target_os = "macos")]
+fn mouse_left_down() -> bool {
+    // kCGEventSourceStateCombinedSessionState = 1，kCGMouseButtonLeft = 0
+    unsafe { CGEventSourceButtonState(1, 0) }
+}
+
+/// 当前光标位置（全局逻辑坐标，左上原点）。造一个空事件问一次位置。
+#[cfg(target_os = "macos")]
+fn cursor_position(source: &core_graphics::event_source::CGEventSource) -> Option<(f64, f64)> {
+    use core_graphics::event::CGEvent;
+
+    let event = CGEvent::new(source.clone()).ok()?;
+    let p = event.location();
+    Some((p.x, p.y))
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    fn CGEventSourceButtonState(state_id: u32, button: u32) -> bool;
 }
 
 /// 按下：记起点；如果面板开着而且没点在面板上，就先收起它。
@@ -174,10 +174,9 @@ fn on_release(app: &AppHandle, g: &mut Gesture, tx: &Sender<Trigger>, x: f64, y:
         return;
     }
 
-    // 过期配对：按下与松开隔了太久，说明中间丢过事件（tap 被暂停、系统休眠等）。
-    // 这时的位移是两个不相干动作的距离，绝不能当成拖选。
+    // 保险丝：正常手势绝不可能超过这么久（休眠恢复等时钟异常时兜底）。
     if pt.elapsed() > STALE_PRESS {
-        diag::log(format!("mouse-up 与按下间隔 {pt:?}，配对作废，按普通点击处理"));
+        diag::log("mouse-up 与按下间隔异常，配对作废，按普通点击处理");
         g.last_click = Some((x, y, Instant::now()));
         return;
     }
@@ -206,82 +205,6 @@ fn on_release(app: &AppHandle, g: &mut Gesture, tx: &Sender<Trigger>, x: f64, y:
     } else {
         g.last_click = Some((x, y, now));
     }
-}
-
-#[cfg(target_os = "macos")]
-fn run_hook(app: AppHandle, raw_tx: Sender<RawEvent>) -> Result<(), String> {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    use core_foundation::base::TCFType;
-    use core_foundation::runloop::{CFRunLoop, kCFRunLoopCommonModes};
-    use core_graphics::event::{
-        CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
-    };
-
-    // tap 被系统停掉时要重新打开，但回调是在 tap 建好之前就写好的，
-    // 所以先留个空位，建好之后再填进去。
-    let port: Rc<RefCell<Option<core_foundation::mach_port::CFMachPort>>> =
-        Rc::new(RefCell::new(None));
-    let port_for_cb = port.clone();
-
-    let tap = CGEventTap::new(
-        // Session 级：拿得到本用户会话里所有应用的事件。
-        CGEventTapLocation::Session,
-        CGEventTapPlacement::HeadInsertEventTap,
-        // ListenOnly：只旁听，不改也不吞事件。
-        CGEventTapOptions::ListenOnly,
-        vec![CGEventType::LeftMouseDown, CGEventType::LeftMouseUp],
-        move |_proxy, kind, event| {
-            match kind {
-                CGEventType::LeftMouseDown => {
-                    let p = event.location();
-                    let _ = raw_tx.send(RawEvent::Down { x: p.x, y: p.y });
-                }
-                CGEventType::LeftMouseUp => {
-                    let p = event.location();
-                    let _ = raw_tx.send(RawEvent::Up { x: p.x, y: p.y });
-                }
-                // 回调超时或用户输入过快时系统会停掉 tap，必须自己重新打开，
-                // 否则划词会毫无征兆地彻底失灵。
-                CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput => {
-                    if let Some(port) = port_for_cb.borrow().as_ref() {
-                        unsafe { CGEventTapEnable(port.as_concrete_TypeRef(), true) };
-                    }
-                    diag::log("事件监听被系统暂停，已重新启用");
-                }
-                _ => {}
-            }
-            // ListenOnly 下返回值会被忽略，照约定返回 None。
-            None
-        },
-    )
-    .map_err(|_| "创建事件监听失败，通常是没给辅助功能权限".to_string())?;
-
-    *port.borrow_mut() = Some(tap.mach_port.clone());
-
-    let source = tap
-        .mach_port
-        .create_runloop_source(0)
-        .map_err(|_| "创建 run loop source 失败".to_string())?;
-    // tap 线程有自己的 run loop，这里把 source 挂上去然后阻塞在 run 里。
-    unsafe { CFRunLoop::get_current().add_source(&source, kCFRunLoopCommonModes) };
-    tap.enable();
-    CFRunLoop::run_current();
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-#[link(name = "CoreGraphics", kind = "framework")]
-unsafe extern "C" {
-    fn CGEventTapEnable(tap: core_foundation::mach_port::CFMachPortRef, enable: bool);
-}
-
-/// 其它平台暂未实现全局监听（Windows 要 UIA + 低级鼠标钩子，
-/// Wayland 干脆禁止全局输入监听）。
-#[cfg(not(target_os = "macos"))]
-fn run_hook(_app: AppHandle, _raw_tx: Sender<RawEvent>) -> Result<(), String> {
-    Err("当前平台尚不支持自动划词".to_string())
 }
 
 fn handle_trigger(app: &AppHandle, trigger: Trigger) {

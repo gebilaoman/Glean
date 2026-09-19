@@ -37,7 +37,7 @@ active-win-pos-rs = "0.8"
 [target.'cfg(target_os = "macos")'.dependencies]
 # 悬浮窗层：不抢焦点的 NSPanel
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2" }
-# 触发层：自建 CGEventTap（只订阅鼠标事件），见 selection.rs
+# 触发层：轮询鼠标状态 + 合成 Cmd+C（见 selection.rs / fetch.rs）
 core-graphics = "0.24"
 core-foundation = "0.10"
 
