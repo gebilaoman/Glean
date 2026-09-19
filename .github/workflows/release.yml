@@ -52,6 +52,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # ad-hoc 签名（无开发者证书时的必须项）：没有有效 bundle 签名，
+          # macOS 的 TCC 不会放行辅助功能——条目加上、开关打开也全是摆设。
+          APPLE_SIGNING_IDENTITY: "-"
         with:
           projectPath: gui
           tagName: ${{ github.ref_name }}
