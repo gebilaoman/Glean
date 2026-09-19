@@ -45,6 +45,14 @@ pub fn run() {
                 eprintln!("[glean] 悬浮窗初始化失败：{e}");
             }
             setup_tray(&handle)?;
+
+            // 未授权时弹一次系统授权窗：让 macOS 把当前二进制自动登记进辅助功能
+            // 列表（授权到位后 selection 的监护线程会自动拉起监听，无需重启）。
+            #[cfg(target_os = "macos")]
+            if !actions::accessibility_trusted() {
+                actions::prompt_accessibility();
+            }
+
             selection::spawn(handle.clone());
 
             Ok(())

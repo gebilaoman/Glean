@@ -424,6 +424,22 @@ pub fn accessibility_trusted() -> bool {
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn AXIsProcessTrusted() -> bool;
+    fn AXIsProcessTrustedWithOptions(options: *const std::ffi::c_void) -> bool;
+}
+
+/// 弹一次系统的辅助功能授权对话框，让 macOS 把**当前**二进制自动登记进
+/// 辅助功能列表（无签名应用每个构建的指纹都不同，靠用户手动「+添加」
+/// 经常加成旧指纹的死条目——开关看着开着、实际不放行）。
+#[cfg(target_os = "macos")]
+pub fn prompt_accessibility() -> bool {
+    use core_foundation::base::TCFType;
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::string::CFString;
+
+    let key = CFString::new("AXTrustedCheckOptionPrompt");
+    let options = CFDictionary::from_CFType_pairs(&[(key, CFBoolean::true_value())]);
+    unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef() as *const _) }
 }
 
 /// 打开「系统设置 → 隐私与安全性 → 辅助功能」。
