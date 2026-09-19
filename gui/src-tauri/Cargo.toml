@@ -25,6 +25,7 @@ reqwest = { workspace = true }
 futures = { workspace = true }
 dirs = "6"
 parking_lot = "0.12"
+chrono = { version = "0.4" }
 # 读 cc-switch 的 SQLite 配置库（bundled：不依赖系统 libsqlite3）
 rusqlite = { version = "0.37", features = ["bundled"] }
 

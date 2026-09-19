@@ -23,6 +23,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::actions;
+use crate::diag;
 use crate::panel;
 use crate::state::AppState;
 
@@ -82,7 +83,7 @@ pub fn spawn(app: AppHandle) {
                     .recv_timeout(Duration::from_secs(3))
                     .is_err()
                 {
-                    eprintln!("[glean] 取词超时（3s），放弃本次触发");
+                    diag::log("取词超时（3s），放弃本次触发");
                 }
             }
         });
@@ -94,16 +95,16 @@ pub fn spawn(app: AppHandle) {
         thread::spawn(move || loop {
             let trusted = actions::accessibility_trusted();
             if !HOOK_UP.load(Ordering::SeqCst) && trusted {
-                eprintln!("[glean] 权限就绪，拉起鼠标监听");
+                diag::log("权限就绪，拉起鼠标监听");
                 HOOK_UP.store(true, Ordering::SeqCst);
                 let (app, tx) = (app.clone(), tx.clone());
                 thread::spawn(move || {
                     match run_hook(app.clone(), tx) {
-                        Ok(()) => eprintln!("[glean] run_hook 线程退出（run loop 结束）"),
+                        Ok(()) => diag::log("run_hook 线程退出（run loop 结束）"),
                         Err(e) => {
                             // 权限被收回或系统拒绝：放回"未运行"，监护线程稍后重试
                             HOOK_UP.store(false, Ordering::SeqCst);
-                            eprintln!("[glean] 全局鼠标监听启动失败：{e}");
+                            diag::log(format!("全局鼠标监听启动失败：{e}"));
                             let _ = app.emit("hook-error", e);
                         }
                     }
@@ -118,7 +119,7 @@ pub fn spawn(app: AppHandle) {
         let tx = tx;
         thread::spawn(move || {
             if let Err(e) = run_hook(app.clone(), tx) {
-                eprintln!("[glean] 全局鼠标监听启动失败：{e}");
+                diag::log(format!("全局鼠标监听启动失败：{e}"));
                 let _ = app.emit("hook-error", e);
             }
         });
@@ -127,7 +128,7 @@ pub fn spawn(app: AppHandle) {
 
 /// 按下：记起点；如果面板开着而且没点在面板上，就先收起它。
 fn on_press(app: &AppHandle, g: &mut Gesture, x: f64, y: f64) {
-    eprintln!("[glean] mouse-down ({x:.0},{y:.0})");
+    diag::log(format!("mouse-down ({x:.0},{y:.0})"));
     let state = app.state::<AppState>();
     let rect = state.geometry.rect();
     g.press_inside_panel = rect.map(|r| r.contains(x, y)).unwrap_or(false);
@@ -152,11 +153,11 @@ fn on_release(app: &AppHandle, g: &mut Gesture, tx: &Sender<Trigger>, x: f64, y:
     let moved = ((x - px).powi(2) + (y - py).powi(2)).sqrt();
     if moved >= state.config.read().drag_threshold {
         g.last_click = None;
-        eprintln!("[glean] 拖选成立（位移 {moved:.0}px），发送触发");
+        diag::log(format!("拖选成立（位移 {moved:.0}px），发送触发"));
         let _ = tx.send(Trigger { x, y });
         return;
     }
-    eprintln!("[glean] 位移不足（{moved:.0}px）");
+    diag::log(format!("位移不足（{moved:.0}px）"));
 
     let now = Instant::now();
     let is_double = state.config.read().double_click_trigger
@@ -215,7 +216,7 @@ fn run_hook(app: AppHandle, tx: Sender<Trigger>) -> Result<(), String> {
                     if let Some(port) = port_for_cb.borrow().as_ref() {
                         unsafe { CGEventTapEnable(port.as_concrete_TypeRef(), true) };
                     }
-                    eprintln!("[glean] 事件监听被系统暂停，已重新启用");
+                    diag::log("事件监听被系统暂停，已重新启用");
                 }
                 _ => {}
             }
@@ -262,21 +263,21 @@ fn handle_trigger(app: &AppHandle, trigger: Trigger) {
         Ok(t) => t,
         Err(e) => {
             // 取不到很常见（自绘 UI、没选中、权限不足），不打扰用户，只记日志。
-            eprintln!("[glean] 取词失败({:?})：{e}", started.elapsed());
+            diag::log(format!("取词失败({:?})：{e}", started.elapsed()));
             return;
         }
     };
     let text = text.trim().to_string();
-    eprintln!(
-        "[glean] 触发({:.1},{:.1}) 取词耗时 {:?}，{} 字符",
+    diag::log(format!(
+        "触发({:.0},{:.0}) 取词耗时 {:?}，{} 字符",
         trigger.x,
         trigger.y,
         started.elapsed(),
         text.chars().count()
-    );
+    ));
     // 空选区必须丢弃，否则普通点击也会让工具栏乱闪。
     if text.is_empty() {
-        eprintln!("[glean] 空文本，丢弃");
+        diag::log("空文本，丢弃");
         return;
     }
 

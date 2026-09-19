@@ -9,6 +9,7 @@
 mod actions;
 mod ccswitch;
 mod config;
+mod diag;
 mod panel;
 mod selection;
 mod state;
@@ -34,6 +35,7 @@ pub fn run() {
     builder
         .setup(|app| {
             let handle = app.handle().clone();
+            diag::log(format!("Glean {} 启动（{}）", env!("CARGO_PKG_VERSION"), std::env::consts::ARCH));
 
             // 常驻后台工具，不占 Dock；界面入口走托盘。
             #[cfg(target_os = "macos")]
@@ -94,6 +96,7 @@ pub fn run() {
             actions::open_accessibility_settings,
             actions::open_config_dir,
             ccswitch::import_cc_switch,
+            diag::get_logs,
             update::get_app_version,
             update::get_system_info,
         ])

@@ -608,6 +608,33 @@ body[data-window='settings'] {
   font-size: 13px;
 }
 
+.diag summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.diag .btn-row {
+  margin: 12px 0 10px;
+}
+
+.diag .logs {
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #141416;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
 .settings .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;

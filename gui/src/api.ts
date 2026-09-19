@@ -79,6 +79,8 @@ export const api = {
   /** 用表单里未保存的音色/语速念一句样例。 */
   previewVoice: (voice: string, rate: number) =>
     invoke<boolean>('preview_voice', { voice, rate }),
+  /** 诊断日志（最近 300 行，旧→新）。 */
+  getLogs: () => invoke<string[]>('get_logs'),
   hidePanel: () => invoke<void>('hide_panel'),
   setPanelHeight: (height: number) => invoke<void>('set_panel_height', { height }),
   openSettings: () => invoke<void>('open_settings'),

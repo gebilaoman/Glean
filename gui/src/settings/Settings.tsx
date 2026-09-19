@@ -65,6 +65,8 @@ export function Settings() {
   const [voices, setVoices] = useState<VoiceInfo[]>([]);
   /** 每个模型卡的模型候选（实时拉取结果），键是模型 id */
   const [modelOptions, setModelOptions] = useState<Record<string, string[]>>({});
+  /** 诊断日志（设置页展开时拉取） */
+  const [logs, setLogs] = useState<string[] | null>(null);
   /** 各模型卡的「刷新」是否在拉取中 */
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
 
@@ -175,6 +177,27 @@ export function Settings() {
       setStatus(String(e));
       window.setTimeout(() => setStatus(''), 2500);
     }
+  };
+
+  const loadLogs = () => api.getLogs().then(setLogs).catch(() => setLogs([]));
+
+  /** 复制日志：优先剪贴板 API，webview 里不行就退回隐藏文本框 + execCommand */
+  const copyLogs = async () => {
+    const text = (logs ?? []).join('\n');
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus('日志已复制');
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      setStatus('日志已复制');
+    }
+    window.setTimeout(() => setStatus(''), 1500);
   };
 
   const checkUpdate = async () => {
@@ -475,6 +498,17 @@ export function Settings() {
           <button onClick={previewVoice}>试听（用当前表单值）</button>
         </div>
       </section>
+
+      <details className="card diag" onToggle={(e) => {
+        if ((e.target as HTMLDetailsElement).open && logs === null) loadLogs();
+      }}>
+        <summary>诊断日志</summary>
+        <div className="btn-row">
+          <button onClick={loadLogs}>刷新</button>
+          <button onClick={copyLogs}>复制全部</button>
+        </div>
+        <pre className="logs">{logs === null ? '载入中…' : logs.join('\n') || '（空）'}</pre>
+      </details>
 
       <section className="card">
         <h2>关于</h2>
