@@ -1,7 +1,7 @@
 //! 触发层 + 取词层。
 //!
 //! 系统里没有「划词事件」，得自己合成：鼠标按下记起点，松开时比位移，超阈值判为拖选；
-//! 另外识别双击选词。判定成立才去调 `get_selected_text()`。
+//! 另外识别双击选词。判定成立才去取词。
 //!
 //! **为什么不用 rdev**：rdev 0.5.3 的事件掩码写死了，把键盘事件也一并订阅，
 //! 而它的 `convert()` 会调 HIToolbox 的 `TSMGetInputSourceProperty` 去查键盘布局——
@@ -9,10 +9,14 @@
 //! 开着的时候敲一下键盘，进程就 SIGTRAP 崩溃**。掩码不可配，只能自己建 tap：
 //! 这里直接用 CoreGraphics 开一个只收左键按下/松开的 ListenOnly tap。
 //!
-//! 两个线程：
-//! - tap 线程跑事件回调，回调里**只做轻量判定**，然后往 channel 里丢一个触发点。
-//!   （回调跑在 tap 的 run loop 上，在里面做取词这种耗时活会被系统判超时、直接停掉 tap。）
-//! - worker 线程收触发点，等选区稳定后取词、定位、弹窗。
+//! 线程结构——**tap 回调必须保持零工作量**。回调跑在系统的 run loop 上，稍慢就会被
+//! 以超时为由停用 tap，停用窗口内的鼠标事件全部丢失，并且手势状态会留下过期的按下，
+//! 与后续无关的松开配成「幽灵拖选」（曾导致划词时灵时不灵、日志里出现位移上千像素
+//! 的假触发）：
+//! - tap 线程：回调只把 (事件类型, 坐标) 塞进 channel 立即返回；
+//! - 手势 worker：消费原始事件，配对、判定、收起面板等全部逻辑都在这条线程；
+//! - 取词 worker：消费判定出的触发点，带 3s 超时地取词、弹窗；
+//! - 监护线程：权限就绪时拉起 tap，权限被收回则自动重启。
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Sender, channel};
@@ -34,6 +38,9 @@ static HOOK_UP: AtomicBool = AtomicBool::new(false);
 const DOUBLE_CLICK_MS: u128 = 400;
 /// 双击两次落点允许的最大偏移（逻辑像素）。
 const DOUBLE_CLICK_SLOP: f64 = 6.0;
+/// 按下超过这么久的配对作废：中间大概率发生过事件丢失（tap 被系统暂停等），
+/// 此时的位移没有意义，不能当成拖选。
+const STALE_PRESS: Duration = Duration::from_secs(2);
 
 /// 推给前端的划词结果。
 #[derive(Debug, Clone, Serialize)]
@@ -41,14 +48,20 @@ pub struct SelectionPayload {
     pub text: String,
 }
 
-/// tap 线程丢给 worker 的触发点（全局逻辑坐标）。
+/// tap 回调转发的最小事件。
+#[derive(Debug)]
+enum RawEvent {
+    Down { x: f64, y: f64 },
+    Up { x: f64, y: f64 },
+}
+
+/// 手势 worker 丢给取词 worker 的触发点（全局逻辑坐标）。
 struct Trigger {
     x: f64,
     y: f64,
 }
 
-/// 手势判定的可变状态。事件回调是 `Fn`，所以放在 `RefCell` 里；
-/// 它只在 tap 线程上被访问，不存在并发。
+/// 手势判定的可变状态。只在手势 worker 线程上被访问，不存在并发。
 #[derive(Default)]
 struct Gesture {
     /// 本次按下的起点与时刻。
@@ -59,30 +72,42 @@ struct Gesture {
     last_click: Option<(f64, f64, Instant)>,
 }
 
-/// 启动 worker 线程与 tap 监护。调用一次。
+/// 启动各 worker 与 tap 监护。调用一次。
 ///
 /// 权限经常是「后到」的：用户装完应用才去系统设置里授权，而 tap 只能在有权限时
-/// 创建。之前只在启动时建一次，授权晚了就得重启应用；现在监护线程每 2 秒看一眼，
-/// 权限一到位（或中途被收回又恢复）就自动把 tap 拉起来。
+/// 创建。监护线程每 2 秒看一眼，权限一到位（或中途被收回又恢复）就自动拉起 tap，
+/// 无需重启应用。
 pub fn spawn(app: AppHandle) {
-    let (tx, rx) = channel::<Trigger>();
+    let (raw_tx, raw_rx) = channel::<RawEvent>();
+    let (trig_tx, trig_rx) = channel::<Trigger>();
 
+    // 手势 worker：事件配对与判定
     {
         let app = app.clone();
         thread::spawn(move || {
-            for trigger in rx {
-                // 取词可能长时间卡住（AX 无响应的应用、模拟复制的等待）。
-                // 一个卡死不能堵死整个 worker：放独立线程跑，限时放弃。
+            let mut g = Gesture::default();
+            for ev in raw_rx {
+                match ev {
+                    RawEvent::Down { x, y } => on_press(&app, &mut g, x, y),
+                    RawEvent::Up { x, y } => on_release(&app, &mut g, &trig_tx, x, y),
+                }
+            }
+        });
+    }
+
+    // 取词 worker：一次触发一个线程地跑，限时放弃（取词可能长时间卡在
+    // 无响应的应用上，不能堵死后续触发）。
+    {
+        let app = app.clone();
+        thread::spawn(move || {
+            for trigger in trig_rx {
                 let app = app.clone();
-                let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+                let (done_tx, done_rx) = channel::<()>();
                 thread::spawn(move || {
                     handle_trigger(&app, trigger);
                     let _ = done_tx.send(());
                 });
-                if done_rx
-                    .recv_timeout(Duration::from_secs(3))
-                    .is_err()
-                {
+                if done_rx.recv_timeout(Duration::from_secs(3)).is_err() {
                     diag::log("取词超时（3s），放弃本次触发");
                 }
             }
@@ -91,22 +116,22 @@ pub fn spawn(app: AppHandle) {
 
     #[cfg(target_os = "macos")]
     {
-        let tx = tx;
+        let tx = raw_tx;
         thread::spawn(move || loop {
             let trusted = actions::accessibility_trusted();
             if !HOOK_UP.load(Ordering::SeqCst) && trusted {
                 diag::log("权限就绪，拉起鼠标监听");
                 HOOK_UP.store(true, Ordering::SeqCst);
-                let (app, tx) = (app.clone(), tx.clone());
-                thread::spawn(move || {
-                    match run_hook(app.clone(), tx) {
-                        Ok(()) => diag::log("run_hook 线程退出（run loop 结束）"),
-                        Err(e) => {
-                            // 权限被收回或系统拒绝：放回"未运行"，监护线程稍后重试
-                            HOOK_UP.store(false, Ordering::SeqCst);
-                            diag::log(format!("全局鼠标监听启动失败：{e}"));
-                            let _ = app.emit("hook-error", e);
-                        }
+                let thread_app = app.clone();
+                let tx = tx.clone();
+                let emit_app = app.clone();
+                thread::spawn(move || match run_hook(thread_app, tx) {
+                    Ok(()) => diag::log("run_hook 线程退出（run loop 结束）"),
+                    Err(e) => {
+                        // 权限被收回或系统拒绝：放回"未运行"，监护线程稍后重试
+                        HOOK_UP.store(false, Ordering::SeqCst);
+                        diag::log(format!("全局鼠标监听启动失败：{e}"));
+                        let _ = emit_app.emit("hook-error", e);
                     }
                 });
             }
@@ -116,9 +141,9 @@ pub fn spawn(app: AppHandle) {
 
     #[cfg(not(target_os = "macos"))]
     {
-        let tx = tx;
+        let tx = raw_tx;
         thread::spawn(move || {
-            if let Err(e) = run_hook(app.clone(), tx) {
+            if let Err(e) = run_hook(app, tx) {
                 diag::log(format!("全局鼠标监听启动失败：{e}"));
                 let _ = app.emit("hook-error", e);
             }
@@ -141,11 +166,19 @@ fn on_press(app: &AppHandle, g: &mut Gesture, x: f64, y: f64) {
 
 /// 松开：位移够大判拖选；不够大就看是不是双击。
 fn on_release(app: &AppHandle, g: &mut Gesture, tx: &Sender<Trigger>, x: f64, y: f64) {
-    let Some((px, py, _)) = g.press.take() else {
+    let Some((px, py, pt)) = g.press.take() else {
         return;
     };
     if g.press_inside_panel {
         g.press_inside_panel = false;
+        return;
+    }
+
+    // 过期配对：按下与松开隔了太久，说明中间丢过事件（tap 被暂停、系统休眠等）。
+    // 这时的位移是两个不相干动作的距离，绝不能当成拖选。
+    if pt.elapsed() > STALE_PRESS {
+        diag::log(format!("mouse-up 与按下间隔 {pt:?}，配对作废，按普通点击处理"));
+        g.last_click = Some((x, y, Instant::now()));
         return;
     }
 
@@ -176,7 +209,7 @@ fn on_release(app: &AppHandle, g: &mut Gesture, tx: &Sender<Trigger>, x: f64, y:
 }
 
 #[cfg(target_os = "macos")]
-fn run_hook(app: AppHandle, tx: Sender<Trigger>) -> Result<(), String> {
+fn run_hook(app: AppHandle, raw_tx: Sender<RawEvent>) -> Result<(), String> {
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -186,7 +219,6 @@ fn run_hook(app: AppHandle, tx: Sender<Trigger>) -> Result<(), String> {
         CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
     };
 
-    let gesture = RefCell::new(Gesture::default());
     // tap 被系统停掉时要重新打开，但回调是在 tap 建好之前就写好的，
     // 所以先留个空位，建好之后再填进去。
     let port: Rc<RefCell<Option<core_foundation::mach_port::CFMachPort>>> =
@@ -204,11 +236,11 @@ fn run_hook(app: AppHandle, tx: Sender<Trigger>) -> Result<(), String> {
             match kind {
                 CGEventType::LeftMouseDown => {
                     let p = event.location();
-                    on_press(&app, &mut gesture.borrow_mut(), p.x, p.y);
+                    let _ = raw_tx.send(RawEvent::Down { x: p.x, y: p.y });
                 }
                 CGEventType::LeftMouseUp => {
                     let p = event.location();
-                    on_release(&app, &mut gesture.borrow_mut(), &tx, p.x, p.y);
+                    let _ = raw_tx.send(RawEvent::Up { x: p.x, y: p.y });
                 }
                 // 回调超时或用户输入过快时系统会停掉 tap，必须自己重新打开，
                 // 否则划词会毫无征兆地彻底失灵。
@@ -248,7 +280,7 @@ unsafe extern "C" {
 /// 其它平台暂未实现全局监听（Windows 要 UIA + 低级鼠标钩子，
 /// Wayland 干脆禁止全局输入监听）。
 #[cfg(not(target_os = "macos"))]
-fn run_hook(_app: AppHandle, _tx: Sender<Trigger>) -> Result<(), String> {
+fn run_hook(_app: AppHandle, _raw_tx: Sender<RawEvent>) -> Result<(), String> {
     Err("当前平台尚不支持自动划词".to_string())
 }
 
