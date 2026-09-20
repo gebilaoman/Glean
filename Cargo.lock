@@ -1714,7 +1714,7 @@ dependencies = [
 
 [[package]]
 name = "glean-gui"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "accessibility-ng",
  "active-win-pos-rs",

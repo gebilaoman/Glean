@@ -26,6 +26,10 @@ export interface AppConfig {
   double_click_trigger: boolean;
   /** 工具栏上显示哪些动作（开关集合，渲染顺序固定）。 */
   actions: ActionKind[];
+  /** 外观主题：auto（跟随系统）/ light / dark。 */
+  theme: string;
+  /** 点缀色预设。 */
+  accent: string;
   /** 朗读音色，空 = 跟随系统默认。 */
   tts_voice: string;
   /** 朗读语速（每分钟字数），0 = 系统默认（约 175）。 */

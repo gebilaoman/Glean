@@ -400,6 +400,15 @@ pub fn save_config(
     config: glean_core::AppConfig,
 ) -> Result<(), String> {
     crate::config::save(&config)?;
+    // 让原生窗口外观（红绿灯、滚动条）跟随主题；auto 时交还给系统。
+    let native = match config.theme.as_str() {
+        "light" => Some(tauri::Theme::Light),
+        "dark" => Some(tauri::Theme::Dark),
+        _ => None,
+    };
+    for w in app.webview_windows().values() {
+        let _ = w.set_theme(native);
+    }
     *state.config.write() = config;
     // 悬浮工具栏要按新配置重排按钮（动作开关），广播一下。
     let _ = app.emit("config-updated", ());

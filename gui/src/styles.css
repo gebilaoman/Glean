@@ -1,17 +1,61 @@
 /* Glean 样式。悬浮窗是透明窗口，所以 body 不能有底色；设置窗自己铺底。 */
 
 :root {
+  --accent-1: #5b9dff;
+  --accent-2: #2f6bd8;
+
+  /* 深色（默认） */
   --panel-bg: rgba(38, 38, 41, 0.97);
   --panel-border: rgba(255, 255, 255, 0.09);
   --panel-radius: 26px;
   --fg: #ececed;
   --fg-dim: #a2a2aa;
-  --accent: #5b9dff;
+  --accent: var(--accent-1);
   --danger: #ff6b6b;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --hover: rgba(255, 255, 255, 0.1);
+  --sep: rgba(255, 255, 255, 0.14);
+  --quote-border: rgba(255, 255, 255, 0.18);
+  --scroll-thumb: rgba(255, 255, 255, 0.16);
+  --card-border: rgba(255, 255, 255, 0.06);
+  --input-border: rgba(255, 255, 255, 0.12);
+  --page-bg: #1c1c1f;
+  --page-grad-end: rgba(28, 28, 31, 0);
+  --card-bg: #242428;
+  --card2-bg: #1f1f23;
+  --input-bg: #1a1a1d;
+  --warn-border: rgba(255, 176, 32, 0.4);
+  --warn-bg: rgba(255, 176, 32, 0.08);
+
   font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+html[data-theme='light'] {
+  --panel-bg: rgba(252, 252, 253, 0.97);
+  --panel-border: rgba(0, 0, 0, 0.08);
+  --fg: #1d1d1f;
+  --fg-dim: #6e6e73;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
+  --hover: rgba(0, 0, 0, 0.06);
+  --sep: rgba(0, 0, 0, 0.12);
+  --quote-border: rgba(0, 0, 0, 0.16);
+  --scroll-thumb: rgba(0, 0, 0, 0.22);
+  --card-border: rgba(0, 0, 0, 0.06);
+  --input-border: rgba(0, 0, 0, 0.14);
+  --page-bg: #f5f5f7;
+  --page-grad-end: rgba(245, 245, 247, 0);
+  --card-bg: #ffffff;
+  --card2-bg: #f5f5f7;
+  --input-bg: #ffffff;
+}
+
+/* 点缀色预设 */
+html[data-accent='green'] { --accent-1: #34c759; --accent-2: #1e9e4a; }
+html[data-accent='purple'] { --accent-1: #a970ff; --accent-2: #7c3aed; }
+html[data-accent='orange'] { --accent-1: #ff9f43; --accent-2: #e8721c; }
+html[data-accent='pink'] { --accent-1: #ff6b9d; --accent-2: #e0447c; }
+html[data-accent='graphite'] { --accent-1: #9a9aa2; --accent-2: #5f5f68; }
 
 * {
   box-sizing: border-box;
@@ -95,7 +139,7 @@ button {
   width: 1px;
   height: 22px;
   margin: 0 6px;
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--sep);
 }
 
 .toolbar .item {
@@ -112,12 +156,12 @@ button {
 }
 
 .toolbar .item:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--hover);
 }
 
 .toolbar .item.active {
-  background: rgba(91, 157, 255, 0.22);
-  color: #cfe1ff;
+  background: color-mix(in srgb, var(--accent-1) 22%, transparent);
+  color: color-mix(in srgb, var(--accent-1) 60%, var(--fg));
 }
 
 .toolbar .item.icon-only {
@@ -156,7 +200,7 @@ button {
 .results .quote {
   margin-bottom: 10px;
   padding-left: 8px;
-  border-left: 2px solid rgba(255, 255, 255, 0.18);
+  border-left: 2px solid var(--quote-border);
   color: var(--fg-dim);
   font-size: 12px;
   line-height: 1.5;
@@ -176,7 +220,7 @@ button {
 
 .model + .model {
   margin-top: 4px;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid var(--card-border);
 }
 
 .model-head {
@@ -209,12 +253,12 @@ button {
   padding: 1px 6px;
   border-radius: 6px;
   font-size: 11px;
-  background: rgba(91, 157, 255, 0.2);
-  color: #cfe1ff;
+  background: color-mix(in srgb, var(--accent-1) 20%, transparent);
+  color: color-mix(in srgb, var(--accent-1) 60%, var(--fg));
 }
 
 .badge.lazy {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--hover);
   color: var(--fg-dim);
 }
 
@@ -235,7 +279,7 @@ button {
 }
 
 .model-head .retry:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--hover);
   color: var(--fg);
 }
 
@@ -261,13 +305,13 @@ button {
 
 .results::-webkit-scrollbar-thumb {
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--scroll-thumb);
 }
 
 /* ---------------- 设置窗 ---------------- */
 
 body[data-window='settings'] {
-  background: #1c1c1f;
+  background: var(--page-bg);
   color: var(--fg);
   font-size: 14px;
 }
@@ -289,7 +333,7 @@ body[data-window='settings'] {
   align-items: flex-end;
   justify-content: space-between;
   padding: 44px 0 16px;
-  background: linear-gradient(#1c1c1f 70%, rgba(28, 28, 31, 0));
+  background: linear-gradient(var(--page-bg) 70%, var(--page-grad-end));
 }
 
 .settings h1 {
@@ -313,13 +357,13 @@ body[data-window='settings'] {
   margin-bottom: 18px;
   padding: 16px 18px;
   border-radius: 14px;
-  background: #242428;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
 }
 
 .settings .card.warn {
-  border-color: rgba(255, 176, 32, 0.4);
-  background: rgba(255, 176, 32, 0.08);
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
 }
 
 .settings .card h2 {
@@ -349,7 +393,7 @@ body[data-window='settings'] {
 .settings .hint code {
   padding: 1px 5px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--hover);
 }
 
 .settings .row {
@@ -369,6 +413,46 @@ body[data-window='settings'] {
   color: #6f6f78;
   font-size: 12px;
   font-style: normal;
+}
+
+.seg {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+}
+
+.seg button {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: none;
+  color: var(--fg-dim);
+}
+
+.seg button.on {
+  background: var(--accent-1);
+  color: #fff;
+}
+
+.swatches {
+  display: flex;
+  gap: 10px;
+}
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  padding: 0;
+}
+
+.swatch.on {
+  border-color: var(--fg);
 }
 
 .action-toggles {
@@ -422,8 +506,8 @@ body[data-window='settings'] {
   height: 32px;
   padding: 0 10px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #1a1a1d;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
   color: var(--fg);
   font: inherit;
   font-size: 13px;
@@ -438,12 +522,12 @@ body[data-window='settings'] {
   height: 30px;
   padding: 0 14px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--hover);
   font-size: 13px;
 }
 
 .settings button:hover {
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--hover);
 }
 
 .settings button.primary {
@@ -464,8 +548,8 @@ body[data-window='settings'] {
   margin-top: 12px;
   padding: 10px 12px;
   border-radius: 10px;
-  background: #1a1a1d;
-  border: 1px dashed rgba(255, 255, 255, 0.14);
+  background: var(--input-bg);
+  border: 1px dashed var(--input-border);
 }
 
 .candidates-head {
@@ -486,7 +570,7 @@ body[data-window='settings'] {
   gap: 10px;
   padding: 6px 0;
   font-size: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--card-border);
 }
 
 .candidate .cand-name {
@@ -514,8 +598,8 @@ body[data-window='settings'] {
   margin-top: 12px;
   padding: 12px;
   border-radius: 10px;
-  background: #1f1f23;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--card2-bg);
+  border: 1px solid var(--card-border);
 }
 
 .model-top {
@@ -601,8 +685,8 @@ body[data-window='settings'] {
   height: 32px;
   padding: 0 8px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #1a1a1d;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
   color: var(--fg);
   font: inherit;
   font-size: 13px;
@@ -624,8 +708,8 @@ body[data-window='settings'] {
   margin: 0;
   padding: 10px 12px;
   border-radius: 8px;
-  background: #141416;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   line-height: 1.6;

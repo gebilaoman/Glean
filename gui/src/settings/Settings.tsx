@@ -5,6 +5,7 @@
  */
 import { useEffect, useState } from 'react';
 
+import { applyTheme } from '../theme';
 import { api, type ActionKind, type AppConfig, type ModelConfig, type SystemInfo, type Thinking, type VoiceInfo } from '../api';
 import { Chevron, Spinner } from '../icons';
 import { PROVIDERS, inferProvider, type ProviderPreset } from '../providers';
@@ -25,6 +26,21 @@ function localeRank(locale: string): number {
   if (locale.startsWith('en')) return 1;
   return 2;
 }
+
+/** 外观选项 */
+const THEMES: { value: string; label: string }[] = [
+  { value: 'auto', label: '跟随系统' },
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+];
+const ACCENTS: { value: string; label: string; color: string }[] = [
+  { value: 'blue', label: '蓝', color: '#5b9dff' },
+  { value: 'green', label: '绿', color: '#34c759' },
+  { value: 'purple', label: '紫', color: '#a970ff' },
+  { value: 'orange', label: '橙', color: '#ff9f43' },
+  { value: 'pink', label: '粉', color: '#ff6b9d' },
+  { value: 'graphite', label: '灰', color: '#9a9aa2' },
+];
 
 const TOOLBAR_ACTIONS: { kind: ActionKind; label: string }[] = [
   { kind: 'search', label: 'AI 搜索' },
@@ -300,6 +316,45 @@ export function Settings() {
               <span>{label}</span>
             </label>
           ))}
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>外观</h2>
+        <div className="row">
+          <span>主题</span>
+          <div className="seg">
+            {THEMES.map((t) => (
+              <button
+                key={t.value}
+                className={(config.theme || 'auto') === t.value ? 'on' : ''}
+                onClick={() => {
+                  patch({ theme: t.value });
+                  // 立即预览（保存后其它窗口跟随）
+                  applyTheme(t.value, config.accent || 'blue');
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="row">
+          <span>点缀色</span>
+          <div className="swatches">
+            {ACCENTS.map((a) => (
+              <button
+                key={a.value}
+                title={a.label}
+                className={`swatch${(config.accent || 'blue') === a.value ? ' on' : ''}`}
+                style={{ background: a.color }}
+                onClick={() => {
+                  patch({ accent: a.value });
+                  applyTheme(config.theme || 'auto', a.value);
+                }}
+              />
+            ))}
+          </div>
         </div>
       </section>
 

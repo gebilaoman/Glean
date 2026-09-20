@@ -27,8 +27,8 @@ export const Logo = ({ size = 22 }: P) => (
   <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
     <defs>
       <linearGradient id="glean-logo" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stopColor="#5b9dff" />
-        <stop offset="100%" stopColor="#2f6bd8" />
+        <stop offset="0%" style={{ stopColor: 'var(--accent-1)' }} />
+        <stop offset="100%" style={{ stopColor: 'var(--accent-2)' }} />
       </linearGradient>
     </defs>
     <circle cx="12" cy="12" r="11" fill="url(#glean-logo)" />

@@ -97,6 +97,12 @@ pub struct AppConfig {
     /// 老配置没有该字段时缺省全开。
     #[serde(default = "default_actions")]
     pub actions: Vec<ActionKind>,
+    /// 外观主题：auto（跟随系统）/ light / dark。空值视为 auto。
+    #[serde(default)]
+    pub theme: String,
+    /// 点缀色预设：blue / green / purple / orange / pink / graphite。
+    #[serde(default)]
+    pub accent: String,
     /// 朗读音色。空 = 跟随系统默认（中文常听着不对，推荐选个 zh_CN 音色）。
     /// 取值是 `say -v '?'` 列出的名字，如 "Tingting"。
     #[serde(default)]
@@ -149,6 +155,8 @@ impl Default for AppConfig {
             settle_ms: default_settle_ms(),
             double_click_trigger: true,
             actions: default_actions(),
+            theme: "auto".to_string(),
+            accent: "blue".to_string(),
             tts_voice: String::new(),
             tts_rate: 0,
         }
