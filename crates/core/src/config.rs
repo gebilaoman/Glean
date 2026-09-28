@@ -71,6 +71,8 @@ pub enum ActionKind {
     Search,
     /// 朗读：不走模型，调系统 TTS。
     Speak,
+    /// 收藏到Attune：不走模型，把选中文本作为草稿写进 Attune 的库（vault）。
+    Attune,
     /// 已下线的动作。旧配置里残留的取值（如 "save"/"copy"）落到这里，
     /// 反序列化不失败——一旦失败 `load()` 会整份回落默认配置，把用户
     /// 配好的模型全冲掉。永不渲染、永不执行，下次保存自然消失。
@@ -110,15 +112,34 @@ pub struct AppConfig {
     /// 朗读语速（每分钟字数，`say -r`）。0 = 系统默认（约 175）。
     #[serde(default)]
     pub tts_rate: u32,
+    /// Attune 的库目录（vault）。空 = 自动发现：读 Attune 自己的
+    /// `~/Library/Application Support/Attune/config.json` 里的 vault_path。
+    #[serde(default)]
+    pub attune_vault: String,
+    /// 收藏在 Attune 文档树里的住址:docs/ 下的文件夹名(所有收藏文档都住这)。
+    #[serde(default = "default_attune_folder")]
+    pub attune_folder: String,
+    /// 默认收藏文档(收藏选择器置顶的那个;文档可随时新建)。
+    #[serde(default = "default_attune_doc")]
+    pub attune_doc: String,
 }
 
 /// 工具栏的固定渲染顺序（前端也按这个顺序过滤）。
-pub const CANONICAL_ACTIONS: [ActionKind; 4] = [
+pub const CANONICAL_ACTIONS: [ActionKind; 5] = [
     ActionKind::Search,
     ActionKind::Translate,
     ActionKind::Explain,
     ActionKind::Speak,
+    ActionKind::Attune,
 ];
+
+fn default_attune_folder() -> String {
+    "Glean".to_string()
+}
+
+fn default_attune_doc() -> String {
+    "收集箱".to_string()
+}
 
 fn default_actions() -> Vec<ActionKind> {
     CANONICAL_ACTIONS.to_vec()
@@ -159,6 +180,9 @@ impl Default for AppConfig {
             accent: "blue".to_string(),
             tts_voice: String::new(),
             tts_rate: 0,
+            attune_vault: String::new(),
+            attune_folder: default_attune_folder(),
+            attune_doc: default_attune_doc(),
         }
     }
 }
@@ -192,7 +216,8 @@ pub fn system_prompt(action: ActionKind, target_lang: &str) -> String {
              控制在 200 字以内，不确定的地方要明确说不确定。"
         ),
         // 朗读不走模型，这个提示词实际不会被用到，兜底而已。
-        ActionKind::Speak | ActionKind::Removed => {
+        // 听读同朗读：不走 LLM,这里是防御性兜底(实际不会调用)
+        ActionKind::Speak | ActionKind::Attune | ActionKind::Removed => {
             format!("用{lang}简要概括用户给出的文本。")
         }
     }

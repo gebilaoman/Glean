@@ -723,3 +723,66 @@ body[data-window='settings'] {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
 }
+
+/* ───────── 收藏到Attune:收藏夹选择器(B站式)───────── */
+.attune-picker .attune-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.attune-picker .attune-folder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  text-align: left;
+  color: inherit;
+}
+.attune-picker .attune-folder:hover {
+  background: var(--hover);
+}
+.attune-picker .attune-folder .badge {
+  flex: 0 0 auto;
+}
+.attune-picker .folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attune-picker .attune-new {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.attune-picker .attune-new input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--sep);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+}
+.attune-picker .attune-new input:focus {
+  outline: none;
+  border-color: var(--accent-1);
+}
+.attune-picker .attune-new button {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.attune-picker .attune-new button:disabled {
+  opacity: 0.4;
+}
+
+/* 设置页:生效目录/错误提示的语义色 */
+.settings .hint.ok {
+  color: var(--ok, #2e8a5b);
+}
+.settings .hint.err {
+  color: var(--err, #d06055);
+}

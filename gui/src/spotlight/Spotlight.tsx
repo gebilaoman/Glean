@@ -16,6 +16,7 @@ import {
   Close,
   DragHandle,
   Explain,
+  Headphones,
   Logo,
   Refresh,
   SearchAI,
@@ -32,7 +33,7 @@ interface Result {
 }
 
 /** 配置还没加载到时先按全量渲染，避免闪一下空工具栏。 */
-const DEFAULT_ACTIONS: ActionKind[] = ['search', 'translate', 'explain', 'speak'];
+const DEFAULT_ACTIONS: ActionKind[] = ['search', 'translate', 'explain', 'speak', 'attune'];
 
 export function Spotlight() {
   const [selection, setSelection] = useState('');
@@ -44,6 +45,10 @@ export function Spotlight() {
   /** 工具栏动作开关（哪些按钮显示） */
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [speaking, setSpeaking] = useState(false);
+  /** 收藏文档选择器（B站式）：点「收藏到Attune」展开，选文档/新建即收藏 */
+  const [attuneOpen, setAttuneOpen] = useState(false);
+  const [attuneDocs, setAttuneDocs] = useState<{ name: string; def: boolean }[]>([]);
+  const [attuneNew, setAttuneNew] = useState('');
 
   // 每列只认自己当前那一路流：换动作时全部作废，重试时只换被点的那列，
   // 其它列照常收分片。凭动作 id 兜底放行「模型清单还没回来」的窗口期。
@@ -59,6 +64,8 @@ export function Spotlight() {
     setResults({});
     setExpanded(new Set());
     setToast('');
+    setAttuneOpen(false);
+    setAttuneNew('');
   }, []);
 
   useEffect(() => {
@@ -166,6 +173,33 @@ export function Spotlight() {
     }
   };
 
+  // 收藏到Attune：点开收藏文档选择器（默认文档置顶 + 已有文档 + 新建）。
+  const onAttune = async () => {
+    setAttuneNew('');
+    try {
+      const docs = await api.listAttuneDocs();
+      const def = config?.attune_doc?.trim() || '收集箱';
+      setAttuneDocs([
+        { name: def, def: true },
+        ...docs.filter((d) => d !== def).map((d) => ({ name: d, def: false })),
+      ]);
+      setAttuneOpen(true);
+    } catch (e) {
+      flash(String(e));
+    }
+  };
+
+  // 选定文档：没有该文档即新建（收藏动作本身建文件），成功后提示并收面板。
+  const collect = async (doc: string) => {
+    setAttuneOpen(false);
+    try {
+      const msg = await api.sendToAttune(doc);
+      flash(msg, true);
+    } catch (e) {
+      flash(String(e));
+    }
+  };
+
   const flash = (msg: string, thenHide = false) => {
     setToast(msg);
     window.setTimeout(() => {
@@ -199,6 +233,7 @@ export function Spotlight() {
     { kind: 'translate', label: () => '翻译', Icon: Translate, run: () => runLlm('translate'), active: () => action === 'translate' },
     { kind: 'explain', label: () => '解释', Icon: Explain, run: () => runLlm('explain'), active: () => action === 'explain' },
     { kind: 'speak', label: () => (speaking ? '停止' : '朗读'), Icon: Speaker, run: onSpeak, active: () => speaking },
+    { kind: 'attune', label: () => '收藏到Attune', Icon: Headphones, run: onAttune },
   ];
 
   return (
@@ -242,6 +277,33 @@ export function Spotlight() {
       </div>
 
       {toast && <div className="toast">{toast}</div>}
+
+      {attuneOpen && (
+        <div className="results attune-picker">
+          <div className="quote">收藏到 Attune —— 选个文档</div>
+          <div className="attune-list">
+            {attuneDocs.map((f) => (
+              <button key={f.name} className="attune-folder" onClick={() => collect(f.name)}>
+                {f.def && <span className="badge">默认</span>}
+                <span className="folder-name">{f.name}</span>
+              </button>
+            ))}
+          </div>
+          <div className="attune-new">
+            <input
+              value={attuneNew}
+              placeholder="新建文档名，回车收藏"
+              onChange={(e) => setAttuneNew(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && attuneNew.trim()) collect(attuneNew.trim());
+              }}
+            />
+            <button disabled={!attuneNew.trim()} onClick={() => collect(attuneNew.trim())}>
+              收藏
+            </button>
+          </div>
+        </div>
+      )}
 
       {action && (
         <div className="results">

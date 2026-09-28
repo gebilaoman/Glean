@@ -2,7 +2,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-export type ActionKind = 'translate' | 'explain' | 'search' | 'speak';
+export type ActionKind = 'translate' | 'explain' | 'search' | 'speak' | 'attune';
 
 /** 思考强度。auto = 不发任何思考参数（兼容性最好）。 */
 export type Thinking = 'auto' | 'off' | 'low' | 'high' | 'max';
@@ -34,6 +34,12 @@ export interface AppConfig {
   tts_voice: string;
   /** 朗读语速（每分钟字数），0 = 系统默认（约 175）。 */
   tts_rate: number;
+  /** Attune 库目录，空 = 自动发现（读 Attune 的 config.json）。 */
+  attune_vault: string;
+  /** 收藏在 Attune 文档树里的住址：docs/ 下的文件夹名。 */
+  attune_folder: string;
+  /** 默认收藏文档（选择器置顶的那个）。 */
+  attune_doc: string;
 }
 
 /** 系统里装的一个朗读音色。 */
@@ -75,6 +81,15 @@ export const api = {
   getSelection: () => invoke<string>('get_selection'),
   /** 朗读划词文本；再点一次停止。返回是否开始朗读。 */
   speakSelection: () => invoke<boolean>('speak_selection'),
+  /** 把划词文本追加进指定收藏文档并唤起 Attune；doc = 文档名（空用配置默认）。 */
+  sendToAttune: (doc?: string) => invoke<string>('send_to_attune', { doc }),
+  /** 解析「当前生效」的 Attune 库目录；candidate = 设置表单里未保存的值（空=自动发现）。 */
+  getAttuneVault: (candidate?: string) =>
+    invoke<{ path: string; source: 'configured' | 'auto' }>('get_attune_vault', { candidate }),
+  /** 系统目录选择器挑 Attune 库目录；取消返回 null。 */
+  pickAttuneVault: () => invoke<string | null>('pick_attune_vault'),
+  /** 收藏文件夹里的文档标题（按最近修改排序），供收藏选择器列出。 */
+  listAttuneDocs: () => invoke<string[]>('list_attune_docs'),
   /** 从端点拉模型清单（GET /models），失败时前端回落预设。 */
   fetchModels: (endpoint: string, apiKey: string) =>
     invoke<string[]>('fetch_models', { endpoint, apiKey }),

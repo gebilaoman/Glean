@@ -80,6 +80,15 @@ export const Speaker = ({ size }: P) => (
   </svg>
 );
 
+/** 收藏到Attune：耳机。把划词文本发到 Attune 做听读材料。 */
+export const Headphones = ({ size }: P) => (
+  <svg {...base(size)} aria-hidden>
+    <path d="M4 14v-2a8 8 0 0 1 16 0v2" />
+    <path d="M4 13.6h2.4a1 1 0 0 1 1 1v3.4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-4.4z" />
+    <path d="M20 13.6h-2.4a1 1 0 0 0-1 1v3.4a1 1 0 0 0 1 1H19a1 1 0 0 0 1-1v-4.4z" />
+  </svg>
+);
+
 /** 重试：环形箭头。 */
 export const Refresh = ({ size = 12 }: P) => (
   <svg {...base(size)} aria-hidden>

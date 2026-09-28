@@ -480,9 +480,452 @@ pub fn open_config_dir(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+// ─────────────────────── 联动 Attune(听读) ───────────────────────
+
+/// 「收藏到Attune」动作:把划词文本**切成句块直接追加**到指定收藏文档,再唤起 Attune。
+///
+/// **收藏即成品**:收藏的内容本来就是一段/一句句,不需要 AI 转化——本地启发式切句
+/// 后直接落为可听读的 Paragraph/Sentence 结构(converted=true),进 Attune 打开就能
+/// 逐句播放。句 id 沿用 Attune 的位置性方案并**接着现有最大序号继续发号**
+/// (绝不重排,否则会打乱老句与音频缓存的映射);zh 留空,想要译文可后续在
+/// Attune 里对该句「AI优化」。重复句(按英文原文比对)自动跳过。
+///
+/// 文档级收藏夹(B站式):所有收藏住在 `docs/{收藏文件夹}/`(默认 Glean),
+/// 「夹」= 里面的文档——选择器列出已有文档 + 默认文档置顶 + 可新建。
+/// doc 参数 = 目标文档名;None 则用配置里的默认收藏文档。
+#[tauri::command]
+pub fn send_to_attune(
+    state: State<'_, AppState>,
+    doc: Option<String>,
+) -> Result<String, String> {
+    let text = state.selection().trim().to_string();
+    if text.is_empty() {
+        return Err("没有选中文本".into());
+    }
+    let (vault_cfg, folder_cfg, doc_cfg) = {
+        let cfg = state.config.read();
+        (cfg.attune_vault.clone(), cfg.attune_folder.clone(), cfg.attune_doc.clone())
+    };
+    let vault = resolve_attune_vault(&vault_cfg)?;
+    let folder = sanitize_folder_name({
+        let f = folder_cfg.trim();
+        if f.is_empty() { "Glean" } else { f }
+    });
+    let doc_name = doc
+        .map(|d| d.trim().to_string())
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| {
+            let d = doc_cfg.trim();
+            if d.is_empty() { "收集箱".to_string() } else { d.to_string() }
+        });
+
+    let dir = attune_docs_root(&vault).join(&folder);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败:{e}"))?;
+
+    // 按 JSON 里的 title 找现有文档(文件名可能带 -id 后缀,不能拿文件名当标题)
+    let existing = find_note_by_title(&dir, &doc_name);
+    let (added, total, all_dup) = match existing {
+        Some(path) => {
+            let mut note: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(&path)
+                    .map_err(|e| format!("读取收藏文档失败:{e}"))?,
+            )
+            .map_err(|e| format!("收藏文档解析失败({}):{e}", path.display()))?;
+            let (added, all_dup) = append_collected_block(&mut note, &text);
+            if added > 0 {
+                std::fs::write(&path, serde_json::to_string_pretty(&note).unwrap_or_default())
+                    .map_err(|e| format!("写入收藏文档失败:{e}"))?;
+            }
+            (added, count_note_sentences(&note), all_dup)
+        }
+        None => {
+            // 新建收藏文档:直接是成品句块(免转化)
+            let mut path = dir.join(format!("{}.json", sanitize_file_name(&doc_name)));
+            if path.exists() {
+                path = dir.join(format!(
+                    "{}-{}.json",
+                    sanitize_file_name(&doc_name),
+                    &attune_note_id()[..12]
+                ));
+            }
+            let note_id = attune_note_id();
+            let mut note = serde_json::json!({
+                "id": note_id,
+                "title": doc_name,
+                "folder": folder,
+                "tags": [],
+                "created_at": chrono::Utc::now().format("%Y-%m-%d").to_string(),
+                "source": "Glean 划词",
+                "raw": text,
+                "converted": true,
+                "blocks": [],
+                "audio_ready": false,
+            });
+            let (added, _) = append_collected_block(&mut note, &text);
+            std::fs::write(&path, serde_json::to_string_pretty(&note).unwrap_or_default())
+                .map_err(|e| format!("写入收藏文档失败:{e}"))?;
+            (added, count_note_sentences(&note), false)
+        }
+    };
+
+    // 唤起 Attune;失败忽略(文档已落库,不算发送失败)
+    let _ = std::process::Command::new("open").args(["-a", "Attune"]).spawn();
+    Ok(if added > 0 {
+        format!("已收藏到「{folder}/{doc_name}」(+{added} 句,共 {total} 句)")
+    } else if all_dup {
+        format!("这批内容已在「{folder}/{doc_name}」里,未重复收藏")
+    } else {
+        format!("没有可收藏的新句子(「{folder}/{doc_name}」共 {total} 句)")
+    })
+}
+
+/// 去重比对用的归一化:去首尾空白、转小写、剥句末标点/收尾引号括号。
+/// ("Old one." 与 "old one" 算同一句,收藏箱宁可少收不重复。)
+fn norm_en(s: &str) -> String {
+    let t = s.trim().to_lowercase();
+    let t = t.trim_end_matches(|c: char| matches!(c, '.' | '!' | '?' | '…' | '"' | '\'' | ')' | ']' | '”' | '’'));
+    t.to_string()
+}
+
+/// 把一次收藏切成句块追加进 note(本次收集 = 一个 Paragraph 块,按句切 Sentence)。
+/// 与现有句按归一化英文去重;句 id 从现有最大序号+1 续发。返回 (新增句数, 是否全部重复)。
+fn append_collected_block(note: &mut serde_json::Value, text: &str) -> (usize, bool) {
+    let note_id = note["id"].as_str().unwrap_or("note_glean").to_string();
+    let existing: Vec<String> = note_sentence_ens(note).iter().map(|e| norm_en(e)).collect();
+    let candidates: Vec<String> = split_sentences_en(text)
+        .into_iter()
+        .filter(|s| !existing.contains(&norm_en(s)))
+        .collect();
+    let raw_count = split_sentences_en(text).len();
+    let all_dup = raw_count > 0 && candidates.is_empty();
+
+    if candidates.is_empty() {
+        return (0, all_dup);
+    }
+    let mut seq = next_sentence_seq(note);
+    let sentences: Vec<serde_json::Value> = candidates
+        .iter()
+        .map(|en| {
+            seq += 1;
+            serde_json::json!({
+                "id": format!("{note_id}_{seq}"),
+                "speaker": "",
+                "en": en,
+                "zh": "",
+                "audio": format!("{note_id}/{seq}.mp3"),
+                "read_aloud": true,
+                "mastered": false,
+            })
+        })
+        .collect();
+    note["blocks"]
+        .as_array_mut()
+        .unwrap_or(&mut vec![])
+        .push(serde_json::json!({ "type": "paragraph", "sentences": sentences }));
+    note["converted"] = serde_json::Value::Bool(true); // 收藏即成品
+    note["audio_ready"] = serde_json::Value::Bool(false); // 新句还没音频
+    (candidates.len(), all_dup)
+}
+
+/// note 里现有全部句子的英文(去重比对用)。
+fn note_sentence_ens(note: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(blocks) = note["blocks"].as_array() {
+        for b in blocks {
+            let key = if b["type"] == "list" { "items" } else { "sentences" };
+            if key == "sentences" {
+                if let Some(ss) = b["sentences"].as_array() {
+                    for s in ss {
+                        if let Some(en) = s["en"].as_str() {
+                            out.push(en.to_string());
+                        }
+                    }
+                }
+            } else if let Some(items) = b["items"].as_array() {
+                for it in items {
+                    if let Some(ss) = it["sentences"].as_array() {
+                        for s in ss {
+                            if let Some(en) = s["en"].as_str() {
+                                out.push(en.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// 现有句 id({note.id}_{序号})的最大序号;没有句则 0。新句从 +1 续发,绝不重排。
+fn next_sentence_seq(note: &serde_json::Value) -> usize {
+    note_sentence_ids(note)
+        .iter()
+        .filter_map(|id| id.rsplit_once('_').and_then(|(_, s)| s.parse::<usize>().ok()))
+        .max()
+        .unwrap_or(0)
+}
+
+fn note_sentence_ids(note: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(blocks) = note["blocks"].as_array() {
+        for b in blocks {
+            let lists: Vec<&serde_json::Value> = if b["type"] == "list" {
+                b["items"].as_array().map(|a| a.iter().collect()).unwrap_or_default()
+            } else {
+                vec![b]
+            };
+            for holder in lists {
+                if let Some(ss) = holder["sentences"].as_array() {
+                    for s in ss {
+                        if let Some(id) = s["id"].as_str() {
+                            out.push(id.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// note 里句子总数(进度提示用)。
+fn count_note_sentences(note: &serde_json::Value) -> usize {
+    note_sentence_ids(note).len()
+}
+
+/// 英文启发式切句:按句末标点(. ! ? …)分句,标点后可跟收尾引号/括号;
+/// 常见缩写(Mr. / e.g. / U.S. 等)与数字小数(3.14)不切。收藏内容本身
+/// 已是一段/一句句,本地切句就够,不需要 AI。
+fn split_sentences_en(text: &str) -> Vec<String> {
+    // 带句点的缩写(比对含句点的末 token,如 "e.g")
+    const ABBREV_DOTTED: [&str; 8] = ["e.g", "i.e", "u.s", "u.k", "a.m", "p.m", "u.s.a", "etc."];
+    // 纯词缩写(末 token 不含句点时比对,如 "Mr")
+    const ABBREV_PLAIN: [&str; 13] = [
+        "mr", "mrs", "ms", "dr", "st", "jr", "sr", "vs", "inc", "ltd", "co", "fig", "approx",
+    ];
+
+    let chars: Vec<char> = text.chars().collect();
+    let n = chars.len();
+    let mut out: Vec<String> = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < n {
+        let c = chars[i];
+        if !matches!(c, '.' | '!' | '?' | '…') {
+            i += 1;
+            continue;
+        }
+        // 吸收句末收尾引号/括号:"”’)] 等
+        let mut j = i + 1;
+        while j < n && matches!(chars[j], '"' | '\'' | ')' | ']' | '”' | '’') {
+            j += 1;
+        }
+        // 必须后面是空白或结尾才算句末(3.14 的小数点后面是数字,不切)
+        if j < n && !chars[j].is_whitespace() {
+            i = j;
+            continue;
+        }
+        // 缩写守卫:回看末 token(字母数字与句点组成的连续段)
+        let seg: String = chars[start..i].iter().collect();
+        let token: String = seg
+            .chars()
+            .rev()
+            .take_while(|c| c.is_alphanumeric() || *c == '.')
+            .collect::<String>()
+            .to_lowercase()
+            .chars()
+            .rev()
+            .collect();
+        let is_abbrev = if token.contains('.') {
+            ABBREV_DOTTED.contains(&token.as_str())
+        } else {
+            ABBREV_PLAIN.contains(&token.as_str())
+        };
+        if !is_abbrev {
+            let sentence: String = chars[start..j].iter().collect();
+            let trimmed = sentence.trim();
+            if !trimmed.is_empty() {
+                out.push(trimmed.to_string());
+            }
+            start = j;
+        }
+        i = j;
+    }
+    let tail: String = chars[start..].iter().collect();
+    let tail = tail.trim();
+    if !tail.is_empty() {
+        out.push(tail.to_string());
+    }
+    out
+}
+
+/// 在目录里按 JSON 内的 title 找文档(文件名可能带 -id 后缀,以内容为准)。
+fn find_note_by_title(dir: &std::path::Path, title: &str) -> Option<std::path::PathBuf> {
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) else { continue };
+        if v.get("title").and_then(|t| t.as_str()) == Some(title) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// 与 Attune 的 gen_note_id 同格式:note_ + 毫秒时间戳hex + 纳秒低16位hex。
+fn attune_note_id() -> String {
+    let ms = chrono::Utc::now().timestamp_millis() as u64;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    format!("note_{:x}{:x}", ms, nanos & 0xffff)
+}
+
+/// 文件名清洗:镜像 Attune 的 sanitize_filename 规则,两边落盘命名保持一致。
+fn sanitize_file_name(name: &str) -> String {
+    let trimmed = name.trim();
+    let fallback = "未命名";
+    let name = if trimmed.is_empty() { fallback } else { trimmed };
+    let mut out = String::new();
+    for ch in name.chars() {
+        if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+            out.push('_');
+        } else {
+            out.push(ch);
+        }
+    }
+    let out = out.trim_matches('.').trim();
+    if out.is_empty() {
+        fallback.to_string()
+    } else {
+        out.to_string()
+    }
+}
+
+/// 文件夹名清洗:按段清洗(支持嵌套如 工作/Glean)。
+fn sanitize_folder_name(folder: &str) -> String {
+    folder
+        .split('/')
+        .map(sanitize_file_name)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// 解析 Attune 库目录:设置里填了就用;留空则读 Attune 自己的 config.json 自动发现。
+fn resolve_attune_vault(configured: &str) -> Result<std::path::PathBuf, String> {
+    let configured = configured.trim();
+    if !configured.is_empty() {
+        let p = std::path::PathBuf::from(configured);
+        if p.is_dir() {
+            return Ok(p);
+        }
+        return Err(format!(
+            "Attune 库目录不存在:{configured}(在 Glean 设置里改,或先在 Attune 里选一次库)"
+        ));
+    }
+    let cfg_path = dirs::config_dir()
+        .map(|d| d.join("Attune").join("config.json"))
+        .ok_or("找不到系统配置目录")?;
+    let vault = vault_from_attune_config(&cfg_path).ok_or(
+        "未能自动发现 Attune 库:请先在 Attune 里选择库目录,或在 Glean 设置里手动填写",
+    )?;
+    Ok(std::path::PathBuf::from(vault))
+}
+
+/// 从 Attune 的 config.json 读 vault_path(只取这一个字段;失败/为空都返回 None)。
+fn vault_from_attune_config(path: &std::path::Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let vp = v.get("vault_path")?.as_str()?.trim().to_string();
+    if vp.is_empty() {
+        None
+    } else {
+        Some(vp)
+    }
+}
+
+/// 设置页展示「当前生效的库目录」。candidate = 表单里还没保存的值:
+/// 传空串表示按「自动发现」解析 —— 这样打字时能实时看到解析结果。
+#[derive(Debug, Serialize)]
+pub struct AttuneVaultStatus {
+    pub path: String,
+    /// "configured"(手填/选择) / "auto"(读 Attune 配置发现)
+    pub source: &'static str,
+}
+
+#[tauri::command]
+pub fn get_attune_vault(candidate: Option<String>) -> Result<AttuneVaultStatus, String> {
+    let c = candidate.unwrap_or_default();
+    let path = resolve_attune_vault(&c)?;
+    let source = if c.trim().is_empty() { "auto" } else { "configured" };
+    Ok(AttuneVaultStatus {
+        path: path.to_string_lossy().to_string(),
+        source,
+    })
+}
+
+/// 系统目录选择器,返回用户选的目录(取消返回 None)。Rust 侧直接调 dialog 插件,
+/// 免装前端 npm 包;blocking 版本必须离开主线程,async 命令跑在 tokio 工作线程上。
+#[tauri::command]
+pub async fn pick_attune_vault(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let picked = app.dialog().file().blocking_pick_folder();
+    Ok(picked.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().to_string()))
+}
+
+/// 收藏文档清单:收藏文件夹(docs/{收藏文件夹}/)下的文档标题,按修改时间新→旧。
+/// 供悬浮面板的收藏选择器用;基于已保存配置解析 vault。
+#[tauri::command]
+pub fn list_attune_docs(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let vault_cfg = state.config.read().attune_vault.clone();
+    let folder_cfg = state.config.read().attune_folder.clone();
+    let vault = resolve_attune_vault(&vault_cfg)?;
+    let folder = {
+        let f = folder_cfg.trim();
+        if f.is_empty() { "Glean".to_string() } else { f.to_string() }
+    };
+    let dir = attune_docs_root(&vault).join(sanitize_folder_name(&folder));
+    if !dir.is_dir() {
+        return Ok(vec![]); // 还没收藏过 → 只有默认文档可选
+    }
+    let mut out: Vec<(std::time::SystemTime, String)> = Vec::new();
+    for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) else { continue };
+        if let Some(title) = v.get("title").and_then(|t| t.as_str()) {
+            let mtime = entry
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            out.push((mtime, title.to_string()));
+        }
+    }
+    out.sort_by(|a, b| b.0.cmp(&a.0)); // 最近收藏的在上面
+    Ok(out.into_iter().map(|(_, t)| t).collect())
+}
+
+/// Attune 的文档根:vault 下的 docs/(与 Attune 的 docs_root 同源)。
+/// media/ 是音频区、与 docs 平级;note.folder 字段相对 docs。
+fn attune_docs_root(vault: &std::path::Path) -> std::path::PathBuf {
+    vault.join("docs")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_voices;
+    use super::{
+        append_collected_block, find_note_by_title, next_sentence_seq, parse_voices,
+        sanitize_file_name, sanitize_folder_name, split_sentences_en, vault_from_attune_config,
+    };
 
     /// 名字可含空格与括号，切分点靠 locale 记号；乱行直接跳过。
     #[test]
@@ -500,5 +943,103 @@ mod tests {
     #[test]
     fn skips_lines_without_locale() {
         assert!(parse_voices("没有 locale 的行\n\n").is_empty());
+    }
+
+    /// 收藏即成品:本地切句 + 句块追加(续号、去重、converted 直出);名称清洗与 Attune 同规则。
+    #[test]
+    fn attune_collect_splits_and_appends_as_blocks() {
+        // 切句:多句、带引号问号、缩写与小数不误切
+        let ss = split_sentences_en(
+            "Hi Iris, version 3.14 is live (finally!). Can you check e.g. the login flow? \"Yes,\" she said.",
+        );
+        assert_eq!(
+            ss,
+            vec![
+                "Hi Iris, version 3.14 is live (finally!).",
+                "Can you check e.g. the login flow?",
+                "\"Yes,\" she said.",
+            ]
+        );
+        // 无句末标点的尾巴也保留
+        assert_eq!(split_sentences_en("one. two three"), vec!["one.", "two three"]);
+
+        // 追加进新文档:converted=true、句 id 从 1 起、audio 指针就位
+        let mut note = serde_json::json!({
+            "id": "note_abc", "title": "收集箱", "blocks": [], "converted": false
+        });
+        let (added, all_dup) = append_collected_block(&mut note, "first one. second one");
+        assert_eq!((added, all_dup), (2, false));
+        assert_eq!(note["converted"], true);
+        assert_eq!(note["blocks"].as_array().unwrap().len(), 1);
+        let ss = note["blocks"][0]["sentences"].as_array().unwrap();
+        assert_eq!(ss[0]["id"], "note_abc_1");
+        assert_eq!(ss[1]["id"], "note_abc_2");
+        assert_eq!(ss[0]["audio"], "note_abc/1.mp3");
+
+        // 再追加:序号接着现有最大续发(不重排),重复句跳过
+        let (added, all_dup) = append_collected_block(&mut note, "third. second one");
+        assert_eq!((added, all_dup), (1, false));
+        let ss = note["blocks"][1]["sentences"].as_array().unwrap();
+        assert_eq!(ss[0]["id"], "note_abc_3", "新句必须从最大序号+1 续发");
+
+        // 全部重复 → (0, true),不落块
+        let (added, all_dup) = append_collected_block(&mut note, "second one");
+        assert_eq!((added, all_dup), (0, true));
+        assert_eq!(note["blocks"].as_array().unwrap().len(), 2);
+
+        // List 块里的句也计入去重与续号
+        let mut note2 = serde_json::json!({
+            "id": "note_lst",
+            "blocks": [{ "type": "list", "items": [
+                { "sentences": [{ "id": "note_lst_7", "en": "old one" }] }] }]
+        });
+        assert_eq!(next_sentence_seq(&note2), 7);
+        let (added, _) = append_collected_block(&mut note2, "old one. brand new");
+        assert_eq!(added, 1);
+        let ss = note2["blocks"][1]["sentences"].as_array().unwrap();
+        assert_eq!(ss[0]["id"], "note_lst_8");
+
+        assert_eq!(sanitize_file_name("a/b:c*?\"<>|d"), "a_b_c______d"); // /:*?"<>| 七个坏字符逐个换 _
+        assert_eq!(sanitize_file_name("  ..dot.. "), "dot");
+        assert_eq!(sanitize_folder_name("工作/Glean"), "工作/Glean");
+        assert_eq!(sanitize_folder_name("a//b"), "a/未命名/b");
+    }
+
+    /// 自动发现:能从 Attune config.json 里读到 vault_path;空值/坏文件返回 None。
+    #[test]
+    fn reads_vault_path_from_attune_config() {
+        let tmp = std::env::temp_dir().join(format!("glean_attune_cfg_{}.json", std::process::id()));
+        std::fs::write(&tmp, r#"{"vault_path":"/tmp/somevault","tts":{}}"#).unwrap();
+        assert_eq!(
+            vault_from_attune_config(&tmp).as_deref(),
+            Some("/tmp/somevault")
+        );
+        std::fs::write(&tmp, r#"{"vault_path":"  "}"#).unwrap();
+        assert_eq!(vault_from_attune_config(&tmp), None);
+        std::fs::write(&tmp, "not json").unwrap();
+        assert_eq!(vault_from_attune_config(&tmp), None);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    /// 按标题找文档:文件名带 -id 后缀也能找到(标题以 JSON 内容为准);找不到返回 None。
+    #[test]
+    fn finds_note_by_title_even_with_id_suffixed_filename() {
+        let dir = std::env::temp_dir().join(format!("glean_docs_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // 文件名与标题不一致(Attune 重名时会写成 标题-id.json)
+        std::fs::write(
+            dir.join("收集箱-note_abc123.json"),
+            r#"{"id":"note_abc123","title":"收集箱","raw":"x"}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.join("other.json"), r#"{"id":"n2","title":"别的","raw":"y"}"#).unwrap();
+        assert_eq!(
+            find_note_by_title(&dir, "收集箱")
+                .map(|p| p.file_name().unwrap().to_string_lossy().to_string()),
+            Some("收集箱-note_abc123.json".to_string())
+        );
+        assert!(find_note_by_title(&dir, "不存在").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

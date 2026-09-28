@@ -47,6 +47,7 @@ const TOOLBAR_ACTIONS: { kind: ActionKind; label: string }[] = [
   { kind: 'translate', label: '翻译' },
   { kind: 'explain', label: '解释' },
   { kind: 'speak', label: '朗读' },
+  { kind: 'attune', label: '收藏到Attune' },
 ];
 
 /** 思考强度选项。文案里写清各档的代价，免得用户要去翻文档。 */
@@ -85,9 +86,47 @@ export function Settings() {
   const [logs, setLogs] = useState<string[] | null>(null);
   /** 各模型卡的「刷新」是否在拉取中 */
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({});
+  /** Attune 库目录解析结果（随表单值实时刷新） */
+  const [vaultStatus, setVaultStatus] = useState<{ path: string; source: string } | null>(null);
+  const [vaultErr, setVaultErr] = useState('');
+
+  /** 解析「按这个值保存后会用哪个目录」；candidate 空串 = 自动发现。 */
+  const refreshVault = (candidate: string) => {
+    api
+      .getAttuneVault(candidate)
+      .then((s) => {
+        setVaultStatus(s);
+        setVaultErr('');
+      })
+      .catch((e) => {
+        setVaultStatus(null);
+        setVaultErr(String(e));
+      });
+  };
+
+  /** 系统目录选择器挑库目录，选中即回填并实时验证。 */
+  const pickVault = async () => {
+    try {
+      const picked = await api.pickAttuneVault();
+      if (picked) {
+        patch({ attune_vault: picked });
+        refreshVault(picked);
+      }
+    } catch (e) {
+      setStatus(String(e));
+    }
+  };
+
+  /** 路径太长时把家目录折叠成 ~，展示友好。 */
+  const shortHome = (p: string) => p.replace(/^\/Users\/[^/]+/, '~');
 
   useEffect(() => {
-    api.getConfig().then(setConfig).catch((e) => setStatus(String(e)));
+    api.getConfig()
+      .then((c) => {
+        setConfig(c);
+        refreshVault(c.attune_vault || ''); // 展示当前保存值对应的生效目录
+      })
+      .catch((e) => setStatus(String(e)));
     api.getAppVersion().then(setVersion).catch(() => {});
     api.getSystemInfo().then(setSys).catch(() => {});
     // 音色列表只用于候选展示，拉不到也不挡设置。中文排最前，方便挑。
@@ -552,6 +591,60 @@ export function Settings() {
         <div className="btn-row">
           <button onClick={previewVoice}>试听（用当前表单值）</button>
         </div>
+      </section>
+
+      <section className="card">
+        <h2>联动 Attune</h2>
+        <p className="hint">
+          工具栏的「收藏到Attune」把选中文本切成句、直接追加进收藏文档（收藏即成品，
+          免转化——进 Attune 打开就能逐句听读；可随时新建文档分主题收藏，重复句自动去重。
+          句子默认没有译文，需要时在 Attune 里对该句「AI优化」补译）。
+          库目录留空 = 自动读取 Attune 自己的配置；需先在 Attune 里选过库。
+        </p>
+        <label className="row">
+          <span>库目录</span>
+          <input
+            value={config.attune_vault}
+            onChange={(e) => {
+              patch({ attune_vault: e.target.value });
+              refreshVault(e.target.value);
+            }}
+            placeholder="留空自动发现（读 Attune 配置）"
+          />
+          <button onClick={pickVault}>选择…</button>
+          <button
+            title="清空，回到自动发现"
+            onClick={() => {
+              patch({ attune_vault: '' });
+              refreshVault('');
+            }}
+          >
+            自动
+          </button>
+        </label>
+        {vaultStatus && (
+          <p className="hint ok">
+            当前生效：{shortHome(vaultStatus.path)}
+            {vaultStatus.source === 'auto' ? '（自动发现）' : '（手动指定）'}
+          </p>
+        )}
+        {vaultErr && <p className="hint err">{vaultErr}</p>}
+        <label className="row">
+          <span>收藏文件夹</span>
+          <input
+            value={config.attune_folder}
+            onChange={(e) => patch({ attune_folder: e.target.value })}
+            placeholder="Glean"
+          />
+        </label>
+        <label className="row">
+          <span>默认收藏文档</span>
+          <input
+            value={config.attune_doc}
+            onChange={(e) => patch({ attune_doc: e.target.value })}
+            placeholder="收集箱"
+          />
+        </label>
       </section>
 
       <details className="card diag" onToggle={(e) => {
