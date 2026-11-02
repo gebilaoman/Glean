@@ -2,7 +2,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-export type ActionKind = 'translate' | 'explain' | 'search' | 'speak' | 'attune';
+export type ActionKind = 'translate' | 'explain' | 'search' | 'copy' | 'speak' | 'attune';
 
 /** 思考强度。auto = 不发任何思考参数（兼容性最好）。 */
 export type Thinking = 'auto' | 'off' | 'low' | 'high' | 'max';
@@ -40,6 +40,8 @@ export interface AppConfig {
   attune_folder: string;
   /** 默认收藏文档（选择器置顶的那个）。 */
   attune_doc: string;
+  /** 动作清单迁移版本号（后端维护，前端原样回传）。 */
+  actions_rev?: number;
 }
 
 /** 系统里装的一个朗读音色。 */
@@ -81,7 +83,9 @@ export const api = {
   getSelection: () => invoke<string>('get_selection'),
   /** 朗读划词文本；再点一次停止。返回是否开始朗读。 */
   speakSelection: () => invoke<boolean>('speak_selection'),
-  /** 把划词文本追加进指定收藏文档并唤起 Attune；doc = 文档名（空用配置默认）。 */
+  /** 把划词文本直接写进剪贴板，返回字符数。 */
+  copySelection: () => invoke<number>('copy_selection'),
+  /** 把划词文本追加进指定收藏文档（不唤起 Attune）；doc = 文档名（空用配置默认）。 */
   sendToAttune: (doc?: string) => invoke<string>('send_to_attune', { doc }),
   /** 解析「当前生效」的 Attune 库目录；candidate = 设置表单里未保存的值（空=自动发现）。 */
   getAttuneVault: (candidate?: string) =>

@@ -46,6 +46,7 @@ const TOOLBAR_ACTIONS: { kind: ActionKind; label: string }[] = [
   { kind: 'search', label: 'AI 搜索' },
   { kind: 'translate', label: '翻译' },
   { kind: 'explain', label: '解释' },
+  { kind: 'copy', label: '复制' },
   { kind: 'speak', label: '朗读' },
   { kind: 'attune', label: '收藏到Attune' },
 ];

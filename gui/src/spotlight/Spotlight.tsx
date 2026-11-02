@@ -14,6 +14,7 @@ import { api, events, type ActionKind, type AppConfig, type ModelBrief } from '.
 import {
   Chevron,
   Close,
+  Copy,
   DragHandle,
   Explain,
   Headphones,
@@ -33,7 +34,7 @@ interface Result {
 }
 
 /** 配置还没加载到时先按全量渲染，避免闪一下空工具栏。 */
-const DEFAULT_ACTIONS: ActionKind[] = ['search', 'translate', 'explain', 'speak', 'attune'];
+const DEFAULT_ACTIONS: ActionKind[] = ['search', 'translate', 'explain', 'copy', 'speak', 'attune'];
 
 export function Spotlight() {
   const [selection, setSelection] = useState('');
@@ -173,6 +174,16 @@ export function Spotlight() {
     }
   };
 
+  // 复制：直接把取词时缓存的文本写进剪贴板，不依赖源应用的 Cmd+C。
+  const onCopy = async () => {
+    try {
+      const n = await api.copySelection();
+      flash(`已复制 ${n} 字`, true);
+    } catch (e) {
+      flash(String(e));
+    }
+  };
+
   // 收藏到Attune：点开收藏文档选择器（默认文档置顶 + 已有文档 + 新建）。
   const onAttune = async () => {
     setAttuneNew('');
@@ -232,6 +243,7 @@ export function Spotlight() {
     { kind: 'search', label: () => 'AI 搜索', Icon: SearchAI, run: () => runLlm('search'), active: () => action === 'search' },
     { kind: 'translate', label: () => '翻译', Icon: Translate, run: () => runLlm('translate'), active: () => action === 'translate' },
     { kind: 'explain', label: () => '解释', Icon: Explain, run: () => runLlm('explain'), active: () => action === 'explain' },
+    { kind: 'copy', label: () => '复制', Icon: Copy, run: onCopy },
     { kind: 'speak', label: () => (speaking ? '停止' : '朗读'), Icon: Speaker, run: onSpeak, active: () => speaking },
     { kind: 'attune', label: () => '收藏到Attune', Icon: Headphones, run: onAttune },
   ];

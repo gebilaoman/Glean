@@ -480,9 +480,28 @@ pub fn open_config_dir(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// 「复制」动作:把缓存的划词文本直接写进系统剪贴板。
+///
+/// 不依赖源应用的 Cmd+C(面板弹出时用户手按 Cmd+C 不稳定):直接用取词时
+/// 缓存的文本,结果确定。返回复制的字符数。
+#[tauri::command]
+pub fn copy_selection(state: State<'_, AppState>) -> Result<usize, String> {
+    copy_text(&state.selection())
+}
+
+fn copy_text(text: &str) -> Result<usize, String> {
+    if text.trim().is_empty() {
+        return Err("没有选中文本".into());
+    }
+    let mut cb = arboard::Clipboard::new().map_err(|e| format!("打开剪贴板失败:{e}"))?;
+    cb.set_text(text.to_string()).map_err(|e| format!("写入剪贴板失败:{e}"))?;
+    Ok(text.chars().count())
+}
+
 // ─────────────────────── 联动 Attune(听读) ───────────────────────
 
-/// 「收藏到Attune」动作:把划词文本**切成句块直接追加**到指定收藏文档,再唤起 Attune。
+/// 「收藏到Attune」动作:把划词文本**切成句块直接追加**到指定收藏文档。
+/// 只写文件,不唤起 Attune(按用户要求;Attune 刷新侧栏即可见)。
 ///
 /// **收藏即成品**:收藏的内容本来就是一段/一句句,不需要 AI 转化——本地启发式切句
 /// 后直接落为可听读的 Paragraph/Sentence 结构(converted=true),进 Attune 打开就能
@@ -568,8 +587,6 @@ pub fn send_to_attune(
         }
     };
 
-    // 唤起 Attune;失败忽略(文档已落库,不算发送失败)
-    let _ = std::process::Command::new("open").args(["-a", "Attune"]).spawn();
     Ok(if added > 0 {
         format!("已收藏到「{folder}/{doc_name}」(+{added} 句,共 {total} 句)")
     } else if all_dup {
@@ -1003,6 +1020,21 @@ mod tests {
         assert_eq!(sanitize_file_name("  ..dot.. "), "dot");
         assert_eq!(sanitize_folder_name("工作/Glean"), "工作/Glean");
         assert_eq!(sanitize_folder_name("a//b"), "a/未命名/b");
+    }
+
+    /// 复制:写进真实系统剪贴板并能读回;空选区报错。测完归还用户剪贴板。
+    #[test]
+    fn copy_text_writes_system_clipboard() {
+        let mut cb = arboard::Clipboard::new().unwrap();
+        let backup = cb.get_text().ok();
+        let sample = "Glean 复制测试 — hello world\n第二行";
+        assert_eq!(super::copy_text(sample), Ok(sample.chars().count()));
+        assert_eq!(cb.get_text().unwrap(), sample);
+        assert!(super::copy_text("  \n ").is_err());
+        assert_eq!(cb.get_text().unwrap(), sample, "空选区不该动剪贴板");
+        if let Some(b) = backup {
+            let _ = cb.set_text(b);
+        }
     }
 
     /// 自动发现:能从 Attune config.json 里读到 vault_path;空值/坏文件返回 None。

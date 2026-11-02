@@ -85,6 +85,7 @@ pub fn run() {
             actions::retry_model,
             actions::fetch_models,
             actions::speak_selection,
+            actions::copy_selection,
             actions::list_voices,
             actions::preview_voice,
             actions::send_to_attune,

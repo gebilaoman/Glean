@@ -73,7 +73,9 @@ pub enum ActionKind {
     Speak,
     /// 收藏到Attune：不走模型，把选中文本作为草稿写进 Attune 的库（vault）。
     Attune,
-    /// 已下线的动作。旧配置里残留的取值（如 "save"/"copy"）落到这里，
+    /// 复制：不走模型，把缓存的划词文本直接写进剪贴板（不依赖源应用的 Cmd+C）。
+    Copy,
+    /// 已下线的动作。旧配置里残留的取值（如 "save"）落到这里，
     /// 反序列化不失败——一旦失败 `load()` 会整份回落默认配置，把用户
     /// 配好的模型全冲掉。永不渲染、永不执行，下次保存自然消失。
     #[serde(other)]
@@ -122,13 +124,21 @@ pub struct AppConfig {
     /// 默认收藏文档(收藏选择器置顶的那个;文档可随时新建)。
     #[serde(default = "default_attune_doc")]
     pub attune_doc: String,
+    /// 动作清单的迁移版本号。新增动作时 +1，`migrate()` 把新动作补进老配置的
+    /// `actions`（只补一次；之后用户在设置页关掉它也不会被再补回来）。
+    #[serde(default)]
+    pub actions_rev: u32,
 }
 
+/// 当前动作清单版本。1 = 新增「复制」。
+pub const ACTIONS_REV: u32 = 1;
+
 /// 工具栏的固定渲染顺序（前端也按这个顺序过滤）。
-pub const CANONICAL_ACTIONS: [ActionKind; 5] = [
+pub const CANONICAL_ACTIONS: [ActionKind; 6] = [
     ActionKind::Search,
     ActionKind::Translate,
     ActionKind::Explain,
+    ActionKind::Copy,
     ActionKind::Speak,
     ActionKind::Attune,
 ];
@@ -183,11 +193,24 @@ impl Default for AppConfig {
             attune_vault: String::new(),
             attune_folder: default_attune_folder(),
             attune_doc: default_attune_doc(),
+            actions_rev: ACTIONS_REV,
         }
     }
 }
 
 impl AppConfig {
+    /// 老配置升级：把它没见过的新动作补进 `actions`。返回是否有改动（调用方据此回写）。
+    pub fn migrate(&mut self) -> bool {
+        if self.actions_rev >= ACTIONS_REV {
+            return false;
+        }
+        if self.actions_rev < 1 && !self.actions.contains(&ActionKind::Copy) {
+            self.actions.push(ActionKind::Copy);
+        }
+        self.actions_rev = ACTIONS_REV;
+        true
+    }
+
     /// 参与对比的模型，按配置顺序返回——顺序即优先级，
     /// 第一个就是结果区默认展开的那列（设置页可上下调整顺序）。
     pub fn active_models(&self) -> Vec<&ModelConfig> {
@@ -217,7 +240,7 @@ pub fn system_prompt(action: ActionKind, target_lang: &str) -> String {
         ),
         // 朗读不走模型，这个提示词实际不会被用到，兜底而已。
         // 听读同朗读：不走 LLM,这里是防御性兜底(实际不会调用)
-        ActionKind::Speak | ActionKind::Attune | ActionKind::Removed => {
+        ActionKind::Speak | ActionKind::Attune | ActionKind::Copy | ActionKind::Removed => {
             format!("用{lang}简要概括用户给出的文本。")
         }
     }
@@ -247,12 +270,35 @@ mod tests {
         let cfg: AppConfig = serde_json::from_str(raw).unwrap();
         assert_eq!(cfg.models.len(), 1);
         assert_eq!(cfg.models[0].api_key, "sk-x");
-        // 残留动作落到 Removed：不参与渲染执行，但不会让解析失败
+        // 残留动作落到 Removed：不参与渲染执行，但不会让解析失败；
+        // "copy" 已重新上线，解析成 Copy
         assert_eq!(
             cfg.actions.iter().filter(|a| **a == ActionKind::Removed).count(),
-            2
+            1
         );
+        assert!(cfg.actions.contains(&ActionKind::Copy));
         assert!(cfg.actions.contains(&ActionKind::Speak));
+    }
+
+    /// 老配置（无 actions_rev）升级时补上「复制」，只补一次；用户之后关掉不再补回。
+    #[test]
+    fn migrate_adds_copy_once() {
+        let raw = r#"{"models": [], "actions": ["search", "translate", "attune"]}"#;
+        let mut cfg: AppConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(cfg.actions_rev, 0);
+        assert!(cfg.migrate());
+        assert!(cfg.actions.contains(&ActionKind::Copy));
+        assert_eq!(cfg.actions_rev, ACTIONS_REV);
+        // 用户在设置页关掉「复制」并保存
+        cfg.actions.retain(|a| *a != ActionKind::Copy);
+        let mut again: AppConfig =
+            serde_json::from_str(&serde_json::to_string(&cfg).unwrap()).unwrap();
+        assert!(!again.migrate());
+        assert!(!again.actions.contains(&ActionKind::Copy));
+        // 新装默认配置不需要迁移，且默认带「复制」
+        let mut d = AppConfig::default();
+        assert!(!d.migrate());
+        assert!(d.actions.contains(&ActionKind::Copy));
     }
 
     /// 顺序即优先级：按配置顺序过滤启用项；primary 不再影响顺序。

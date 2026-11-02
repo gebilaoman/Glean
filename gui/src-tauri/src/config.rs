@@ -22,10 +22,15 @@ pub fn load() -> AppConfig {
     let Ok(raw) = std::fs::read_to_string(&path) else {
         return AppConfig::default();
     };
-    serde_json::from_str(&raw).unwrap_or_else(|e| {
+    let mut cfg: AppConfig = serde_json::from_str(&raw).unwrap_or_else(|e| {
         eprintln!("[glean] 配置解析失败，回落默认值：{e}");
         AppConfig::default()
-    })
+    });
+    // 老配置补上新动作（如「复制」），并回写，保证只迁移一次
+    if cfg.migrate() {
+        let _ = save(&cfg);
+    }
+    cfg
 }
 
 pub fn save(config: &AppConfig) -> Result<(), String> {
